@@ -92,6 +92,9 @@ pub async fn handle_exchange(
     if req.identity.is_empty() {
         return Err(Error::BadRequest("identity must not be empty".into()));
     }
+    if !is_valid_name(&req.identity) {
+        return Err(Error::BadRequest("invalid identity format".into()));
+    }
 
     let (owner, repo, is_org_level) = parse_scope(&req.scope)?;
     let claims = state.oidc.verify(bearer_token).await?;
@@ -186,9 +189,18 @@ pub(crate) async fn handle_healthz() -> axum::Json<HealthResponse> {
     axum::Json(HealthResponse { ok: true })
 }
 
+fn is_valid_name(s: &str) -> bool {
+    static RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z0-9._-]+$").unwrap());
+    RE.is_match(s)
+}
+
 fn parse_scope(scope: &str) -> Result<(String, String, bool), Error> {
     if let Some((owner, repo)) = scope.split_once('/') {
         if owner.is_empty() || repo.is_empty() {
+            return Err(Error::BadRequest("invalid scope format".into()));
+        }
+        if !is_valid_name(owner) || !is_valid_name(repo) {
             return Err(Error::BadRequest("invalid scope format".into()));
         }
         let is_org_level = repo == ".github";
@@ -196,6 +208,9 @@ fn parse_scope(scope: &str) -> Result<(String, String, bool), Error> {
     } else {
         // Org-level scope: "org" → reads from ".github" repo
         if scope.is_empty() {
+            return Err(Error::BadRequest("invalid scope format".into()));
+        }
+        if !is_valid_name(scope) {
             return Err(Error::BadRequest("invalid scope format".into()));
         }
         Ok((scope.to_owned(), ".github".to_owned(), true))
@@ -242,5 +257,25 @@ mod tests {
         assert!(parse_scope("").is_err());
         assert!(parse_scope("/repo").is_err());
         assert!(parse_scope("owner/").is_err());
+    }
+
+    #[test]
+    fn test_parse_scope_rejects_invalid_chars() {
+        assert!(parse_scope("org/../evil").is_err());
+        assert!(parse_scope("org/repo name").is_err());
+        assert!(parse_scope("org/<script>").is_err());
+        assert!(parse_scope("org\0evil").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_name() {
+        assert!(is_valid_name("my-repo"));
+        assert!(is_valid_name("my.repo"));
+        assert!(is_valid_name("my_repo"));
+        assert!(is_valid_name(".github"));
+        assert!(!is_valid_name("../etc/passwd"));
+        assert!(!is_valid_name("repo name"));
+        assert!(!is_valid_name("repo/name"));
+        assert!(!is_valid_name(""));
     }
 }
