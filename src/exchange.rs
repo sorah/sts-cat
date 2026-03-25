@@ -97,6 +97,7 @@ pub async fn handle_exchange(
     }
 
     let (owner, repo, is_org_level) = parse_scope(&req.scope)?;
+    let owner = owner.to_ascii_lowercase();
     let claims = state.oidc.verify(bearer_token).await?;
 
     let installation_id = if let Some(id) = state.installation_cache.get(&owner).await {
