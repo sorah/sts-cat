@@ -26,7 +26,10 @@ impl AwsKmsSigner {
 #[cfg(feature = "aws-kms")]
 #[async_trait::async_trait]
 impl crate::signer::Signer for AwsKmsSigner {
-    async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, crate::error::Error> {
+    async fn sign(
+        &self,
+        message: &[u8],
+    ) -> Result<secrecy::SecretBox<Vec<u8>>, crate::error::Error> {
         let resp = self
             .client
             .sign()
@@ -42,7 +45,9 @@ impl crate::signer::Signer for AwsKmsSigner {
             crate::error::Error::Internal("KMS Sign response missing signature".into())
         })?;
 
-        Ok(signature.as_ref().to_vec())
+        Ok(secrecy::SecretBox::new(Box::new(
+            signature.as_ref().to_vec(),
+        )))
     }
 }
 
@@ -72,8 +77,9 @@ mod tests {
             "arn:aws:kms:us-east-1:123456789012:key/test-key-id".into(),
         );
 
+        use secrecy::ExposeSecret as _;
         let result = signer.sign(b"test message").await.unwrap();
-        assert_eq!(result, expected_signature);
+        assert_eq!(result.expose_secret().as_slice(), expected_signature);
         assert_eq!(rule.num_calls(), 1);
     }
 

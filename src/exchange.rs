@@ -8,8 +8,31 @@ pub struct ExchangeRequest {
 
 #[derive(serde::Serialize)]
 pub struct ExchangeResponse {
-    pub token: String,
+    pub token: GitHubToken,
 }
+
+/// Inner type for GitHub installation access tokens.
+/// Implements SerializableSecret intentionally — sts-cat is a token vending service.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, zeroize::Zeroize, zeroize::ZeroizeOnDrop,
+)]
+pub struct GitHubTokenInner(String);
+impl secrecy::SerializableSecret for GitHubTokenInner {}
+impl secrecy::CloneableSecret for GitHubTokenInner {}
+
+impl GitHubTokenInner {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for GitHubTokenInner {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+pub type GitHubToken = secrecy::SecretBox<GitHubTokenInner>;
 
 pub struct AppState {
     pub config: crate::config::Config,
@@ -105,8 +128,11 @@ pub async fn handle_exchange(
         .create_installation_token(installation_id, &compiled.permissions, &repositories)
         .await?;
 
+    use secrecy::ExposeSecret as _;
     use sha2::Digest as _;
-    let token_hash = hex::encode(sha2::Sha256::digest(token.as_bytes()));
+    let token_hash = hex::encode(sha2::Sha256::digest(
+        token.expose_secret().as_str().as_bytes(),
+    ));
     tracing::info!(
         event = "exchange_success",
         scope = %req.scope,

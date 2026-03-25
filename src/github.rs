@@ -53,8 +53,9 @@ impl GitHubClient {
         }
     }
 
-    async fn app_jwt(&self) -> Result<String, Error> {
+    async fn app_jwt(&self) -> Result<secrecy::SecretString, Error> {
         use base64::Engine as _;
+        use secrecy::ExposeSecret as _;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -77,12 +78,15 @@ impl GitHubClient {
         let message = format!("{header_b64}.{claims_b64}");
 
         let signature = self.signer.sign(message.as_bytes()).await?;
-        let signature_b64 = engine.encode(&signature);
+        let signature_b64 = engine.encode(signature.expose_secret());
 
-        Ok(format!("{message}.{signature_b64}"))
+        Ok(secrecy::SecretString::from(format!(
+            "{message}.{signature_b64}"
+        )))
     }
 
     pub async fn get_installation_id(&self, owner: &str) -> Result<u64, Error> {
+        use secrecy::ExposeSecret as _;
         let jwt = self.app_jwt().await?;
 
         for page in 1..=MAX_PAGES {
@@ -94,7 +98,7 @@ impl GitHubClient {
             let resp = self
                 .http
                 .get(&url)
-                .bearer_auth(&jwt)
+                .bearer_auth(jwt.expose_secret())
                 .send()
                 .await
                 .map_err(Error::GitHubApi)?;
@@ -131,6 +135,8 @@ impl GitHubClient {
         repo: &str,
         path: &str,
     ) -> Result<String, Error> {
+        use secrecy::ExposeSecret as _;
+
         let read_permissions = crate::trust_policy::Permissions {
             inner: [("contents".into(), "read".into())].into(),
         };
@@ -156,12 +162,11 @@ impl GitHubClient {
         let resp = self
             .http
             .get(&url)
-            .bearer_auth(&read_token)
+            .bearer_auth(read_token.expose_secret().as_str())
             .send()
             .await
             .map_err(Error::GitHubApi)?;
 
-        let revoke_token = read_token.clone();
         let fetch_result = if !resp.status().is_success() {
             let status = resp.status();
             if status == reqwest::StatusCode::NOT_FOUND {
@@ -177,7 +182,7 @@ impl GitHubClient {
             decode_content(&file_resp.content)
         };
 
-        self.revoke_token(&revoke_token).await;
+        self.revoke_token(&read_token).await;
 
         fetch_result
     }
@@ -187,7 +192,7 @@ impl GitHubClient {
         installation_id: u64,
         permissions: &crate::trust_policy::Permissions,
         repositories: &[String],
-    ) -> Result<String, Error> {
+    ) -> Result<crate::exchange::GitHubToken, Error> {
         self.create_installation_token_raw(installation_id, permissions, repositories)
             .await
     }
@@ -197,7 +202,8 @@ impl GitHubClient {
         installation_id: u64,
         permissions: &crate::trust_policy::Permissions,
         repositories: &[String],
-    ) -> Result<String, Error> {
+    ) -> Result<crate::exchange::GitHubToken, Error> {
+        use secrecy::ExposeSecret as _;
         let jwt = self.app_jwt().await?;
 
         let url = format!(
@@ -213,7 +219,7 @@ impl GitHubClient {
         let resp = self
             .http
             .post(&url)
-            .bearer_auth(&jwt)
+            .bearer_auth(jwt.expose_secret())
             .json(&body)
             .send()
             .await
@@ -246,14 +252,15 @@ impl GitHubClient {
 
         let token_resp: TokenResponse = resp.json().await.map_err(Error::GitHubApi)?;
 
-        Ok(token_resp.token)
+        Ok(secrecy::SecretBox::new(Box::new(token_resp.token)))
     }
 
-    async fn revoke_token(&self, token: &str) {
+    async fn revoke_token(&self, token: &crate::exchange::GitHubToken) {
+        use secrecy::ExposeSecret as _;
         let resp = self
             .http
             .delete(format!("{}/installation/token", self.base_url))
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret().as_str())
             .send()
             .await;
 
@@ -332,7 +339,7 @@ struct FileContent {
 
 #[derive(serde::Deserialize)]
 struct TokenResponse {
-    token: String,
+    token: crate::exchange::GitHubTokenInner,
 }
 
 #[cfg(test)]
@@ -376,11 +383,13 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
     #[tokio::test]
     async fn test_app_jwt_structure() {
         use base64::Engine as _;
+        use secrecy::ExposeSecret as _;
 
         let client = GitHubClient::new("https://api.github.com", 12345, test_signer());
         let jwt = client.app_jwt().await.unwrap();
+        let jwt_str = jwt.expose_secret();
 
-        let parts: Vec<&str> = jwt.split('.').collect();
+        let parts: Vec<&str> = jwt_str.split('.').collect();
         assert_eq!(parts.len(), 3);
 
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -420,6 +429,8 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
 
     #[tokio::test]
     async fn test_app_jwt_verifiable() {
+        use secrecy::ExposeSecret as _;
+
         let client = GitHubClient::new("https://api.github.com", 99999, test_signer());
         let jwt = client.app_jwt().await.unwrap();
 
@@ -429,8 +440,12 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
         validation.set_issuer(&["99999"]);
         validation.validate_aud = false;
 
-        let token_data =
-            jsonwebtoken::decode::<serde_json::Value>(&jwt, &decoding_key, &validation).unwrap();
+        let token_data = jsonwebtoken::decode::<serde_json::Value>(
+            jwt.expose_secret(),
+            &decoding_key,
+            &validation,
+        )
+        .unwrap();
 
         assert_eq!(token_data.claims["iss"], 99999);
     }
@@ -438,6 +453,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
     #[tokio::test]
     async fn test_raw_signer_produces_valid_rs256() {
         use base64::Engine as _;
+        use secrecy::ExposeSecret as _;
         let signer = crate::signer::raw::RawSigner::from_pem(TEST_RSA_PEM).unwrap();
 
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -446,9 +462,9 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
         let msg = format!("{header}.{payload}");
 
         let sig = signer.sign(msg.as_bytes()).await.unwrap();
-        assert!(!sig.is_empty());
+        assert!(!sig.expose_secret().is_empty());
 
-        let sig_b64 = engine.encode(&sig);
+        let sig_b64 = engine.encode(sig.expose_secret());
         let token = format!("{msg}.{sig_b64}");
 
         let pub_pem = test_public_key_pem();
