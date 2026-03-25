@@ -87,6 +87,49 @@ GET /healthz
 
 Returns `{"ok": true}` with HTTP 200.
 
+### Usage from GitHub Actions
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Get token from sts-cat
+        uses: actions/github-script@v7
+        id: sts-cat
+        with:
+          script: |
+            const idToken = await core.getIDToken('sts.example.com');
+            const resp = await fetch('https://sts.example.com/token', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${idToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                scope: '${{ github.repository }}',
+                identity: 'deploy',
+              }),
+            });
+            if (!resp.ok) {
+              throw new Error(`sts-cat returned ${resp.status}: ${await resp.text()}`);
+            }
+            const { token } = await resp.json();
+            core.setSecret(token);
+            core.setOutput('github_token', token);
+          result-encoding: string
+
+      - name: Use the token
+        env:
+          GITHUB_TOKEN: ${{ steps.sts-cat.outputs.github_token }}
+        run: |
+          gh api repos/myorg/myrepo/pulls
+```
+
+The audience passed to `core.getIDToken()` must match the `STS_CAT_DOMAIN` value (or the `audience` field in the trust policy).
+
 ## Trust Policies
 
 Trust policies are TOML files stored at `{policy_path_prefix}/{identity}{policy_file_extension}` in the target repository (or the `.github` repo for org-level policies).
