@@ -21,19 +21,15 @@ pub struct AppState {
 
 pub async fn handle_exchange(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<AppState>>,
-    headers: axum::http::HeaderMap,
+    bearer: Result<
+        axum_extra::TypedHeader<headers::Authorization<headers::authorization::Bearer>>,
+        axum_extra::typed_header::TypedHeaderRejection,
+    >,
     axum::Json(req): axum::Json<ExchangeRequest>,
 ) -> Result<axum::Json<ExchangeResponse>, Error> {
-    // Extract bearer token
-    let auth_header = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| Error::Unauthenticated("missing Authorization header".into()))?;
-
-    let bearer_token = auth_header
-        .strip_prefix("Bearer ")
-        .or_else(|| auth_header.strip_prefix("bearer "))
-        .ok_or_else(|| Error::Unauthenticated("invalid Authorization header format".into()))?;
+    let axum_extra::TypedHeader(authorization) = bearer
+        .map_err(|_| Error::Unauthenticated("missing or invalid Authorization header".into()))?;
+    let bearer_token = authorization.token();
 
     // Validate request fields
     if req.scope.is_empty() {
