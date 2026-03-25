@@ -13,6 +13,7 @@ path = "src/bin/sts-cat-lambda.rs"
 required-features = ["aws-lambda"]
 
 [features]
+default = ["aws-kms", "aws-lambda"]
 aws-kms = ["dep:aws-sdk-kms", "dep:aws-config"]
 aws-lambda = ["dep:lambda_http"]
 
