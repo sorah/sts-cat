@@ -272,7 +272,10 @@ impl OidcVerifier {
             .build()
             .expect("failed to build OIDC HTTP client");
 
-        let cache = moka::future::Cache::builder().max_capacity(100).build();
+        let cache = moka::future::Cache::builder()
+            .max_capacity(100)
+            .time_to_live(std::time::Duration::from_secs(900))
+            .build();
 
         Self { http, cache }
     }
