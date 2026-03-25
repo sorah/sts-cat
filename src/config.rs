@@ -13,10 +13,10 @@ pub struct Config {
     #[arg(long, env = "STS_CAT_DOMAIN")]
     pub domain: String,
 
-    #[arg(long, default_value = "0.0.0.0", env = "STS_CAT_HOST")]
+    #[arg(long, default_value = "0.0.0.0", env = "HOST")]
     pub host: String,
 
-    #[arg(long, default_value_t = 8080, env = "STS_CAT_PORT")]
+    #[arg(long, default_value_t = 8080, env = "PORT")]
     pub port: u16,
 
     #[arg(long, env = "STS_CAT_KEY_SOURCE")]

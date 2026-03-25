@@ -55,7 +55,7 @@ impl StringMatcher {
         match (exact, pattern) {
             (Some(exact), None) => Ok(StringMatcher::Exact(exact)),
             (None, Some(pattern)) => {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
+                let re = compile_anchored_regex(&pattern)?;
                 Ok(StringMatcher::Pattern(re))
             }
             (Some(_), Some(_)) => Err(Error::PolicyParse(toml::de::Error::custom(format!(
@@ -94,7 +94,7 @@ impl AudienceMatch {
         match (exact, pattern) {
             (Some(exact), None) => Ok(AudienceMatch::Exact(exact)),
             (None, Some(pattern)) => {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
+                let re = compile_anchored_regex(&pattern)?;
                 Ok(AudienceMatch::Pattern(re))
             }
             (None, None) => Ok(AudienceMatch::Domain),
@@ -134,6 +134,10 @@ impl AudienceMatch {
     }
 }
 
+fn compile_anchored_regex(pattern: &str) -> Result<regex::Regex, Error> {
+    Ok(regex::Regex::new(&format!("^{pattern}$"))?)
+}
+
 fn compile_claim_patterns(
     patterns: Option<std::collections::HashMap<String, String>>,
 ) -> Result<Vec<(String, regex::Regex)>, Error> {
@@ -142,7 +146,7 @@ fn compile_claim_patterns(
     };
     let mut compiled = Vec::with_capacity(patterns.len());
     for (name, pattern) in patterns {
-        let re = regex::Regex::new(&format!("^{pattern}$"))?;
+        let re = compile_anchored_regex(&pattern)?;
         compiled.push((name, re));
     }
     Ok(compiled)

@@ -38,8 +38,37 @@ pub struct AppState {
     pub config: crate::config::Config,
     pub github: crate::github::GitHubClient,
     pub oidc: crate::oidc::OidcVerifier,
-    pub policy_cache: moka::future::Cache<(String, String, String), String>,
-    pub installation_cache: moka::future::Cache<String, u64>,
+    policy_cache: moka::future::Cache<
+        (String, String, String),
+        std::sync::Arc<crate::trust_policy::CompiledTrustPolicy>,
+    >,
+    installation_cache: moka::future::Cache<String, u64>,
+}
+
+impl AppState {
+    pub async fn build(
+        config: crate::config::Config,
+    ) -> Result<std::sync::Arc<Self>, anyhow::Error> {
+        let signer = config.build_signer().await?;
+        let github =
+            crate::github::GitHubClient::new(&config.github_api_url, config.github_app_id, signer);
+        let oidc = crate::oidc::OidcVerifier::new();
+
+        let policy_cache = moka::future::Cache::builder()
+            .max_capacity(200)
+            .time_to_live(std::time::Duration::from_secs(300))
+            .build();
+
+        let installation_cache = moka::future::Cache::builder().max_capacity(200).build();
+
+        Ok(std::sync::Arc::new(Self {
+            config,
+            github,
+            oidc,
+            policy_cache,
+            installation_cache,
+        }))
+    }
 }
 
 pub async fn handle_exchange(
@@ -78,19 +107,18 @@ pub async fn handle_exchange(
     );
 
     let cache_key = (owner.clone(), repo.clone(), req.identity.clone());
-    let policy_toml = if let Some(cached) = state.policy_cache.get(&cache_key).await {
+    let compiled = if let Some(cached) = state.policy_cache.get(&cache_key).await {
         cached
     } else {
         let content = state
             .github
             .get_trust_policy_content(installation_id, &owner, &repo, &policy_path)
             .await?;
-        state.policy_cache.insert(cache_key, content.clone()).await;
-        content
+        let policy = crate::trust_policy::TrustPolicy::parse(&content)?;
+        let compiled = std::sync::Arc::new(policy.compile(is_org_level)?);
+        state.policy_cache.insert(cache_key, compiled.clone()).await;
+        compiled
     };
-
-    let policy = crate::trust_policy::TrustPolicy::parse(&policy_toml)?;
-    let compiled = policy.compile(is_org_level)?;
 
     let actor = match compiled.check_token(&claims, &state.config.domain) {
         Ok(actor) => actor,
@@ -147,11 +175,11 @@ pub async fn handle_exchange(
 }
 
 #[derive(serde::Serialize)]
-pub struct HealthResponse {
+pub(crate) struct HealthResponse {
     ok: bool,
 }
 
-pub async fn handle_healthz() -> axum::Json<HealthResponse> {
+pub(crate) async fn handle_healthz() -> axum::Json<HealthResponse> {
     axum::Json(HealthResponse { ok: true })
 }
 

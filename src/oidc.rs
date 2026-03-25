@@ -204,15 +204,13 @@ fn is_printable(ch: char) -> bool {
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub struct OidcDiscoveryDocument {
-    pub issuer: String,
-    pub jwks_uri: String,
+pub(crate) struct OidcDiscoveryDocument {
+    pub(crate) jwks_uri: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct OidcProvider {
-    pub issuer: String,
-    pub jwks: jsonwebtoken::jwk::JwkSet,
+pub(crate) struct OidcProvider {
+    pub(crate) jwks: jsonwebtoken::jwk::JwkSet,
 }
 
 pub struct OidcVerifier {
@@ -346,10 +344,7 @@ impl OidcVerifier {
         let jwks: jsonwebtoken::jwk::JwkSet =
             serde_json::from_slice(&jwks_body).map_err(|e| Error::Internal(Box::new(e)))?;
 
-        Ok(OidcProvider {
-            issuer: doc.issuer,
-            jwks,
-        })
+        Ok(OidcProvider { jwks })
     }
 
     pub async fn verify(&self, token: &str) -> Result<TokenClaims, Error> {
@@ -438,8 +433,11 @@ pub(crate) async fn read_limited_body(
     }
 
     use futures_util::StreamExt as _;
+    let initial_capacity = resp
+        .content_length()
+        .map_or(4096, |len| (len as usize).min(limit));
     let mut stream = resp.bytes_stream();
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(initial_capacity);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(&map_err)?;
         if buf.len() + chunk.len() > limit {
