@@ -45,6 +45,9 @@ pub struct Config {
         env = "STS_CAT_POLICY_FILE_EXTENSION"
     )]
     pub policy_file_extension: String,
+
+    #[arg(long, env = "STS_CAT_ALLOWED_ISSUER_URLS", value_delimiter = ',')]
+    pub allowed_issuer_urls: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]

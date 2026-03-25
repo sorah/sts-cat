@@ -205,6 +205,7 @@ fn is_printable(ch: char) -> bool {
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct OidcDiscoveryDocument {
+    pub(crate) issuer: String,
     pub(crate) jwks_uri: String,
 }
 
@@ -216,11 +217,12 @@ pub(crate) struct OidcProvider {
 pub struct OidcVerifier {
     http: reqwest::Client,
     cache: moka::future::Cache<String, std::sync::Arc<OidcProvider>>,
+    allowed_issuers: Option<std::collections::HashSet<String>>,
 }
 
 impl Default for OidcVerifier {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -251,7 +253,7 @@ impl OneOrMany {
 }
 
 impl OidcVerifier {
-    pub fn new() -> Self {
+    pub fn new(allowed_issuer_urls: Option<Vec<String>>) -> Self {
         let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
             let url_str = attempt.url().to_string();
             if validate_issuer(&url_str).is_err() {
@@ -277,7 +279,17 @@ impl OidcVerifier {
             .time_to_live(std::time::Duration::from_secs(900))
             .build();
 
-        Self { http, cache }
+        let allowed_issuers = allowed_issuer_urls.map(|urls| {
+            urls.into_iter()
+                .map(|u| u.trim_end_matches('/').to_owned())
+                .collect()
+        });
+
+        Self {
+            http,
+            cache,
+            allowed_issuers,
+        }
     }
 
     async fn discover(&self, issuer: &str) -> Result<std::sync::Arc<OidcProvider>, Error> {
@@ -331,6 +343,14 @@ impl OidcVerifier {
         let doc: OidcDiscoveryDocument =
             serde_json::from_slice(&body).map_err(|e| Error::Internal(Box::new(e)))?;
 
+        let expected = issuer.trim_end_matches('/');
+        let actual = doc.issuer.trim_end_matches('/');
+        if expected != actual {
+            return Err(Error::Unauthenticated(
+                "OIDC discovery issuer mismatch".into(),
+            ));
+        }
+
         let jwks_resp = self
             .http
             .get(&doc.jwks_uri)
@@ -368,6 +388,14 @@ impl OidcVerifier {
         let issuer = &unverified.claims.iss;
 
         validate_issuer(issuer)?;
+
+        if let Some(ref allowed) = self.allowed_issuers {
+            let normalized = issuer.trim_end_matches('/');
+            if !allowed.contains(normalized) {
+                return Err(Error::Unauthenticated("issuer not in allowed list".into()));
+            }
+        }
+
         let provider = self.discover(issuer).await?;
 
         let kid = header.kid.as_deref();

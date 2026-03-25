@@ -56,6 +56,7 @@ All server configuration is provided via environment variables:
 | `STS_CAT_KEY_FILE` | When `file` | Path to the GitHub App PEM private key |
 | `STS_CAT_KEY_ENV` | When `env` | Name of env var containing the PEM private key |
 | `STS_CAT_KMS_KEY_ARN` | When `kms` | ARN of the AWS KMS asymmetric signing key |
+| `STS_CAT_ALLOWED_ISSUER_URLS` | No | Comma-separated list of allowed OIDC issuer URLs. When set, only tokens from these issuers are accepted. |
 
 ### Trust Policies
 
@@ -142,7 +143,8 @@ Errors are returned as JSON with an appropriate HTTP status code:
 
 ## Security and Privacy Considerations
 
-- **OIDC issuer validation**: Strict validation rules (HTTPS, no path traversal, ASCII-only, etc.) prevent SSRF and token confusion attacks.
+- **OIDC issuer validation**: Strict validation rules (HTTPS, no path traversal, ASCII-only, etc.) prevent SSRF and token confusion attacks. Operators can further restrict accepted issuers via `STS_CAT_ALLOWED_ISSUER_URLS`.
+- **OIDC discovery issuer verification**: The `issuer` field returned in the OIDC discovery document is verified to match the requested issuer, preventing token confusion via compromised discovery endpoints.
 - **Default branch only**: Trust policies are always read from the repository's default branch, preventing branch-based policy injection.
 - **Token revocation**: Temporary read-only installation tokens used to fetch policies are revoked immediately after use.
 - **No internal error leakage**: Client-facing error messages are generic. Internal details (GitHub API errors, stack traces) are only logged via tracing at debug level.
