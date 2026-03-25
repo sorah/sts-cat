@@ -3,6 +3,13 @@ use crate::error::Error;
 const MAX_PAGES: u32 = 50;
 const PER_PAGE: u32 = 100;
 const MAX_RESPONSE_SIZE: usize = 100 * 1024; // 100 KiB
+
+/// Percent-encoding set for URL path segments (RFC 3986 unreserved chars preserved).
+const PATH_SEGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
 pub struct GitHubClient {
     http: reqwest::Client,
     app_id: u64,
@@ -123,8 +130,20 @@ impl GitHubClient {
             .create_installation_token_raw(installation_id, &read_permissions, &[repo.to_owned()])
             .await?;
 
-        // Fetch the file content using the scoped token
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}");
+        // Fetch the file content using the scoped token.
+        // Encode each path segment individually to preserve `/` separators.
+        let encoded_path = path
+            .split('/')
+            .map(|seg| {
+                percent_encoding::utf8_percent_encode(seg, PATH_SEGMENT_ENCODE_SET).to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/contents/{encoded_path}",
+            percent_encoding::utf8_percent_encode(owner, PATH_SEGMENT_ENCODE_SET),
+            percent_encoding::utf8_percent_encode(repo, PATH_SEGMENT_ENCODE_SET),
+        );
 
         let resp = self
             .http
