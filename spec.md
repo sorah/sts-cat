@@ -154,6 +154,7 @@ Errors are returned as JSON with an appropriate HTTP status code:
 - **Claim type strictness**: Only string and boolean claim values are accepted. Booleans are coerced to `"true"`/`"false"`. All other types (numbers, arrays, objects) are rejected.
 - **Repositories field enforcement**: The `repositories` field in trust policies is rejected at parse time for repository-level scopes, preventing privilege escalation.
 - **HTTP timeouts**: All outbound HTTP requests (OIDC, GitHub API) use explicit connect and response timeouts to prevent hanging connections.
+- **Org-level policy scope**: Organization-level trust policies that omit the `repositories` field grant the declared permissions across **all repositories** the GitHub App is installed on within that organization. This matches octo-sts behavior and is by design — the GitHub App's installation scope (which repositories it is installed on) is the access control boundary. Operators should scope GitHub App installations to only the repositories that need token exchange.
 
 ## Comparison with octo-sts: Gap Analysis
 
