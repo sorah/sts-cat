@@ -2,6 +2,9 @@ use crate::error::Error;
 
 const MAX_RESPONSE_SIZE: usize = 100 * 1024; // 100 KiB
 
+static PATH_CHAR_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z0-9\-._~/]+$").unwrap());
+
 pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
     if issuer.is_empty() || issuer.chars().count() > 255 {
         return Err(Error::Unauthenticated(
@@ -12,7 +15,6 @@ pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
     let parsed = url::Url::parse(issuer)
         .map_err(|_| Error::Unauthenticated("issuer is not a valid URL".into()))?;
 
-    // HTTPS required (except localhost, 127.0.0.1, ::1)
     match parsed.scheme() {
         "https" => {}
         "http" => match parsed.host() {
@@ -28,7 +30,7 @@ pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
         }
     }
 
-    // No query string or fragment (check both parsed and raw)
+    // Check both parsed and raw: url::Url may normalize away certain encodings
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(Error::Unauthenticated(
             "issuer must not contain query or fragment".into(),
@@ -40,12 +42,10 @@ pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
         ));
     }
 
-    // Must have host
     if parsed.host_str().is_none() || parsed.host_str() == Some("") {
         return Err(Error::Unauthenticated("issuer must have a host".into()));
     }
 
-    // No userinfo
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(Error::Unauthenticated(
             "issuer must not contain userinfo".into(),
@@ -59,13 +59,11 @@ pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
             .strip_prefix(parsed.scheme())
             .and_then(|s| s.strip_prefix("://"))
             .unwrap_or("");
-        // Extract host portion (before first / or end of string)
         let host_part = if let Some(pos) = after_scheme.find('/') {
             &after_scheme[..pos]
         } else {
             after_scheme
         };
-        // Strip port if present (but handle IPv6 [::1]:port)
         if host_part.starts_with('[') {
             // IPv6: take everything including brackets
             host_part.to_owned()
@@ -127,15 +125,12 @@ pub fn validate_issuer(issuer: &str) -> Result<(), Error> {
             ));
         }
 
-        // Strict character whitelist
-        let path_re = regex::Regex::new(r"^[a-zA-Z0-9\-._~/]+$").unwrap();
-        if !path_re.is_match(path) {
+        if !PATH_CHAR_RE.is_match(path) {
             return Err(Error::Unauthenticated(
                 "issuer path contains invalid characters".into(),
             ));
         }
 
-        // Per-segment validation
         for segment in path.split('/') {
             if segment.is_empty() {
                 continue;
@@ -177,31 +172,23 @@ fn validate_claim_string(value: &str, reject_chars: &str, field: &str) -> Result
         )));
     }
     for ch in value.chars() {
-        // Control chars (0x00-0x1f)
         if (ch as u32) <= 0x1f {
             return Err(Error::Unauthenticated(format!(
                 "{field} contains control characters"
             )));
         }
-        // Whitespace
         if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
             return Err(Error::Unauthenticated(format!(
                 "{field} contains whitespace"
             )));
         }
-        // Rejected injection chars
         if reject_chars.contains(ch) {
             return Err(Error::Unauthenticated(format!(
                 "{field} contains invalid character"
             )));
         }
-        // Must be printable
         if !ch.is_alphanumeric() && !ch.is_ascii_punctuation() && ch as u32 > 127 {
-            // For non-ASCII, check if printable (Go's unicode.IsPrint)
-            // In Rust, char::is_alphanumeric covers most printable Unicode.
-            // We need to also allow ASCII printable symbols.
-            // This is approximate — Go's unicode.IsPrint accepts chars in Unicode categories L, M, N, P, S, Zs
-            // Reject if not in any of these categories.
+            // Approximate Go's unicode.IsPrint (categories L, M, N, P, S, Zs)
             if !is_printable(ch) {
                 return Err(Error::Unauthenticated(format!(
                     "{field} contains non-printable character"
@@ -213,7 +200,6 @@ fn validate_claim_string(value: &str, reject_chars: &str, field: &str) -> Result
 }
 
 fn is_printable(ch: char) -> bool {
-    // Approximation of Go's unicode.IsPrint: graphic characters plus space (but we already reject space above)
     !ch.is_control() && ch as u32 != 0xFFFD
 }
 
@@ -267,7 +253,6 @@ impl OneOrMany {
 
 impl OidcVerifier {
     pub fn new() -> Self {
-        // Custom redirect policy that validates each redirect destination
         let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
             let url_str = attempt.url().to_string();
             if validate_issuer(&url_str).is_err() {
@@ -340,11 +325,10 @@ impl OidcVerifier {
             return Err(Error::OidcHttpError(status.as_u16()));
         }
 
-        let body = read_limited_body(resp, MAX_RESPONSE_SIZE).await?;
+        let body = read_limited_body(resp, MAX_RESPONSE_SIZE, Error::OidcDiscovery).await?;
         let doc: OidcDiscoveryDocument =
             serde_json::from_slice(&body).map_err(|e| Error::Internal(Box::new(e)))?;
 
-        // Fetch JWKS
         let jwks_resp = self
             .http
             .get(&doc.jwks_uri)
@@ -356,7 +340,8 @@ impl OidcVerifier {
             return Err(Error::OidcHttpError(jwks_resp.status().as_u16()));
         }
 
-        let jwks_body = read_limited_body(jwks_resp, MAX_RESPONSE_SIZE).await?;
+        let jwks_body =
+            read_limited_body(jwks_resp, MAX_RESPONSE_SIZE, Error::OidcDiscovery).await?;
         let jwks: jsonwebtoken::jwk::JwkSet =
             serde_json::from_slice(&jwks_body).map_err(|e| Error::Internal(Box::new(e)))?;
 
@@ -367,11 +352,9 @@ impl OidcVerifier {
     }
 
     pub async fn verify(&self, token: &str) -> Result<TokenClaims, Error> {
-        // Decode header without verification to get issuer from claims
         let header = jsonwebtoken::decode_header(token)?;
 
-        // We need the issuer from the token to discover the provider.
-        // Decode claims without verification first.
+        // Extract issuer without signature verification to discover the OIDC provider
         let mut validation = jsonwebtoken::Validation::default();
         validation.insecure_disable_signature_validation();
         validation.validate_aud = false;
@@ -385,17 +368,12 @@ impl OidcVerifier {
 
         let issuer = &unverified.claims.iss;
 
-        // Validate issuer format
         validate_issuer(issuer)?;
-
-        // Discover OIDC provider
         let provider = self.discover(issuer).await?;
 
-        // Find the matching key from JWKS
         let kid = header.kid.as_deref();
         let decoding_key = find_decoding_key(&provider.jwks, kid, &header.alg)?;
 
-        // Verify JWT with proper validation
         let mut verification = jsonwebtoken::Validation::new(header.alg);
         verification.validate_aud = false; // Audience checked later by trust policy
         verification.set_issuer(&[issuer]);
@@ -417,7 +395,6 @@ fn find_decoding_key(
             Error::Unauthenticated(format!("no matching key found for kid: {kid}"))
         })?
     } else {
-        // If no kid, try to find a key matching the algorithm
         let alg_str = format!("{alg:?}");
         jwks.keys
             .iter()
@@ -449,8 +426,8 @@ fn is_permanent_error(e: &Error) -> bool {
 pub(crate) async fn read_limited_body(
     resp: reqwest::Response,
     limit: usize,
+    map_err: impl Fn(reqwest::Error) -> Error,
 ) -> Result<Vec<u8>, Error> {
-    // Fast reject if Content-Length exceeds limit
     if let Some(len) = resp.content_length()
         && len as usize > limit
     {
@@ -459,12 +436,11 @@ pub(crate) async fn read_limited_body(
         )));
     }
 
-    // Stream-read with byte counter to abort early without buffering the full body
     use futures_util::StreamExt as _;
     let mut stream = resp.bytes_stream();
     let mut buf = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(Error::OidcDiscovery)?;
+        let chunk = chunk.map_err(&map_err)?;
         if buf.len() + chunk.len() > limit {
             return Err(Error::Unauthenticated(format!(
                 "response too large (limit: {limit})"

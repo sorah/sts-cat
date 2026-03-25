@@ -31,7 +31,6 @@ pub async fn handle_exchange(
         .map_err(|_| Error::Unauthenticated("missing or invalid Authorization header".into()))?;
     let bearer_token = authorization.token();
 
-    // Validate request fields
     if req.scope.is_empty() {
         return Err(Error::BadRequest("scope must not be empty".into()));
     }
@@ -39,13 +38,9 @@ pub async fn handle_exchange(
         return Err(Error::BadRequest("identity must not be empty".into()));
     }
 
-    // Parse scope
     let (owner, repo, is_org_level) = parse_scope(&req.scope)?;
-
-    // Verify OIDC token
     let claims = state.oidc.verify(bearer_token).await?;
 
-    // Look up installation ID (with cache)
     let installation_id = if let Some(id) = state.installation_cache.get(&owner).await {
         id
     } else {
@@ -54,13 +49,11 @@ pub async fn handle_exchange(
         id
     };
 
-    // Build policy file path
     let policy_path = format!(
         "{}/{}{}",
         state.config.policy_path_prefix, req.identity, state.config.policy_file_extension
     );
 
-    // Fetch trust policy (with cache)
     let cache_key = (owner.clone(), repo.clone(), req.identity.clone());
     let policy_toml = if let Some(cached) = state.policy_cache.get(&cache_key).await {
         cached
@@ -73,11 +66,9 @@ pub async fn handle_exchange(
         content
     };
 
-    // Parse and compile trust policy
     let policy = crate::trust_policy::TrustPolicy::parse(&policy_toml)?;
     let compiled = policy.compile(is_org_level)?;
 
-    // Check token against policy
     let actor = match compiled.check_token(&claims, &state.config.domain) {
         Ok(actor) => actor,
         Err(e) => {
@@ -103,20 +94,17 @@ pub async fn handle_exchange(
         policy_path = %policy_path,
     );
 
-    // Determine repositories for the token
     let repositories = if is_org_level {
         compiled.repositories.clone().unwrap_or_default()
     } else {
         vec![repo.clone()]
     };
 
-    // Create scoped installation token
     let token = state
         .github
         .create_installation_token(installation_id, &compiled.permissions, &repositories)
         .await?;
 
-    // Log success with token hash (never log the token itself)
     use sha2::Digest as _;
     let token_hash = hex::encode(sha2::Sha256::digest(token.as_bytes()));
     tracing::info!(

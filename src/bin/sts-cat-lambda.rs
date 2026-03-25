@@ -33,7 +33,9 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let router = sts_cat::exchange::build_router(state);
-    lambda_http::run(router).await?;
+    lambda_http::run(router)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     Ok(())
 }

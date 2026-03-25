@@ -10,6 +10,7 @@ const PATH_SEGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::
     .remove(b'.')
     .remove(b'_')
     .remove(b'~');
+
 pub struct GitHubClient {
     http: reqwest::Client,
     base_url: String,
@@ -130,7 +131,6 @@ impl GitHubClient {
         repo: &str,
         path: &str,
     ) -> Result<String, Error> {
-        // Create a scoped read-only token for fetching the policy file
         let read_permissions = crate::trust_policy::Permissions {
             inner: [("contents".into(), "read".into())].into(),
         };
@@ -138,7 +138,6 @@ impl GitHubClient {
             .create_installation_token_raw(installation_id, &read_permissions, &[repo.to_owned()])
             .await?;
 
-        // Fetch the file content using the scoped token.
         // Encode each path segment individually to preserve `/` separators.
         let encoded_path = path
             .split('/')
@@ -162,7 +161,6 @@ impl GitHubClient {
             .await
             .map_err(Error::GitHubApi)?;
 
-        // Revoke the temporary token regardless of fetch result
         let revoke_token = read_token.clone();
         let fetch_result = if !resp.status().is_success() {
             let status = resp.status();
@@ -172,7 +170,8 @@ impl GitHubClient {
                 Err(handle_github_error(resp).await)
             }
         } else {
-            let body_bytes = crate::oidc::read_limited_body(resp, MAX_RESPONSE_SIZE).await?;
+            let body_bytes =
+                crate::oidc::read_limited_body(resp, MAX_RESPONSE_SIZE, Error::GitHubApi).await?;
             let file_resp: FileContent =
                 serde_json::from_slice(&body_bytes).map_err(|e| Error::Internal(Box::new(e)))?;
             decode_content(&file_resp.content)
@@ -381,18 +380,15 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
         let client = GitHubClient::new("https://api.github.com", 12345, test_signer());
         let jwt = client.app_jwt().await.unwrap();
 
-        // JWT has three dot-separated parts
         let parts: Vec<&str> = jwt.split('.').collect();
         assert_eq!(parts.len(), 3);
 
-        // Decode and verify header
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let header_bytes = engine.decode(parts[0]).unwrap();
         let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
         assert_eq!(header["alg"], "RS256");
         assert_eq!(header["typ"], "JWT");
 
-        // Decode and verify claims
         let claims_bytes = engine.decode(parts[1]).unwrap();
         let claims: serde_json::Value = serde_json::from_slice(&claims_bytes).unwrap();
         assert_eq!(claims["iss"], 12345);

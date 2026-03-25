@@ -1129,8 +1129,18 @@ Implementation complete.
 - **D13: `config.rs` — startup validation in `build_signer` not `config.rs`** — Validation happens at startup but in binary entrypoints. Resolution: **fixed** — moved `build_signer` to `Config::build_signer()` method in `config.rs`
 - **D14: `build_signer` duplicated between binaries** — Identical code in both binaries. Resolution: **fixed** — both binaries now call `config.build_signer()`
 
+- **D15: `sts-cat-lambda.rs` — compilation error with `aws-lambda` feature** — `lambda_http::run()` returns `Result<_, Box<dyn Error + Send + Sync>>` which can't convert to `anyhow::Error` via `?` in Rust 2024 edition. Resolution: **fixed** — added `.map_err(|e| anyhow::anyhow!(e))`
+- **D16: `exchange.rs` — spec pseudocode not updated for TypedHeader** — Spec shows `headers: HeaderMap`, impl uses `TypedHeader<Authorization<Bearer>>` (commit b7ccd84). Resolution: **deferred** — spec update skipped per user decision
+- **D17: `config.rs` — `github_api_url` / `STS_CAT_GITHUB_API_URL` not in spec** — Added in commit a072a9b, not reflected in spec Config struct or env var table. Resolution: **deferred** — spec update skipped per user decision
+- **D18: `oidc.rs` — `read_limited_body` error type misattributed in GitHub context** — Chunk read errors hardcoded as `Error::OidcDiscovery`, incorrect when called from `github.rs`. Resolution: **fixed** — parameterized `read_limited_body` with error mapping function; callers pass `Error::OidcDiscovery` or `Error::GitHubApi`
+- **D19: `trust_policy.rs` — `use serde::de::Error as _` at module scope** — Trait import should be scoped per sorah-guides:rust. Resolution: **fixed** — moved inside `compile()` method
+- **D20: `oidc.rs` — regex recompiled on every `validate_issuer` call** — `Regex::new()` in hot path. Resolution: **fixed** — replaced with `std::sync::LazyLock<regex::Regex>` static
+- **D21: `github.rs` — missing blank line between top-level items** — No blank line between `PATH_SEGMENT_ENCODE_SET` const and `pub struct GitHubClient`. Resolution: **fixed**
+- **D22: Narrating comments throughout codebase** — ~38 comments across 4 files violated sorah-guides:coding ("do not narrate what the code is doing"). Resolution: **fixed** — removed all narrating comments; kept ~17 comments that explain WHY, document assumptions, or provide external context
+
 ### Updates
 
 - 2026-03-26: Initial implementation complete. All core modules implemented per spec. 34 unit tests passing (OIDC validation, trust policy parsing/compilation/matching, scope parsing, claim type handling, JWT construction and signature verification using RFC 9500 test key). Zero clippy warnings. Integration-style exchange handler tests deferred — require mock GitHub API server.
 - 2026-03-26: Validation started. 14 discrepancies identified. 5 resolved as spec updates (D1, D3, D6, D7, D12), 1 accepted (D2), 8 require implementation fixes (D4, D5, D8, D9, D10, D11, D13, D14).
 - 2026-03-26: All 8 implementation fixes completed (D4, D5, D8, D9, D10, D11, D13, D14). 36 tests passing with `aws-kms` feature (34 base + 2 KMS). Zero clippy warnings. Zero fmt issues.
+- 2026-03-26: Second validation pass (code quality focus). 8 new discrepancies (D15-D22). 6 fixed (D15, D18-D22), 2 deferred spec updates (D16-D17). 36 tests passing with all features. Zero clippy warnings. Zero fmt issues.

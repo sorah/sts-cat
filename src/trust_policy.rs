@@ -1,5 +1,4 @@
 use crate::error::Error;
-use serde::de::Error as _;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct TrustPolicy {
@@ -58,14 +57,14 @@ impl TrustPolicy {
     }
 
     pub fn compile(self, is_org_level: bool) -> Result<CompiledTrustPolicy, Error> {
-        // Reject repositories field on repo-level policies
+        use serde::de::Error as _;
+
         if !is_org_level && self.repositories.is_some() {
             return Err(Error::PermissionDenied(
                 "repositories field is not allowed in repository-level trust policies".into(),
             ));
         }
 
-        // Exactly one of issuer or issuer_pattern
         let issuer = match (self.issuer, self.issuer_pattern) {
             (Some(exact), None) => IssuerMatch::Exact(exact),
             (None, Some(pattern)) => {
@@ -84,7 +83,6 @@ impl TrustPolicy {
             }
         };
 
-        // Exactly one of subject or subject_pattern
         let subject = match (self.subject, self.subject_pattern) {
             (Some(exact), None) => SubjectMatch::Exact(exact),
             (None, Some(pattern)) => {
@@ -103,7 +101,6 @@ impl TrustPolicy {
             }
         };
 
-        // At most one of audience or audience_pattern; if neither, use Domain
         let audience = match (self.audience, self.audience_pattern) {
             (Some(exact), None) => AudienceMatch::Exact(exact),
             (None, Some(pattern)) => {
@@ -118,7 +115,6 @@ impl TrustPolicy {
             }
         };
 
-        // Compile claim patterns
         let claim_patterns = if let Some(patterns) = self.claim_pattern {
             let mut compiled = Vec::with_capacity(patterns.len());
             for (name, pattern) in patterns {
@@ -154,7 +150,6 @@ impl CompiledTrustPolicy {
             crate::oidc::validate_audience(aud)?;
         }
 
-        // Match issuer
         match &self.issuer {
             IssuerMatch::Exact(expected) => {
                 if claims.iss != *expected {
@@ -170,7 +165,6 @@ impl CompiledTrustPolicy {
             }
         }
 
-        // Match subject
         match &self.subject {
             SubjectMatch::Exact(expected) => {
                 if claims.sub != *expected {
@@ -186,7 +180,6 @@ impl CompiledTrustPolicy {
             }
         }
 
-        // Match audience
         let audiences = claims.aud.as_slice();
         match &self.audience {
             AudienceMatch::Exact(expected) => {
@@ -210,7 +203,6 @@ impl CompiledTrustPolicy {
             }
         }
 
-        // Match claim patterns
         let mut matched_claims = Vec::new();
         for (claim_name, pattern) in &self.claim_patterns {
             let value = claims.extra.get(claim_name).ok_or_else(|| {
