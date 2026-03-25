@@ -37,6 +37,11 @@ pub enum Error {
     Internal(Box<dyn std::error::Error + Send + Sync>),
 }
 
+#[derive(serde::Serialize)]
+struct ErrorBody<'a> {
+    error: &'a str,
+}
+
 impl axum::response::IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
@@ -100,7 +105,7 @@ impl axum::response::IntoResponse for Error {
             _ => {}
         }
 
-        let body = serde_json::json!({"error": message});
+        let body = ErrorBody { error: message };
         (status, axum::Json(body)).into_response()
     }
 }

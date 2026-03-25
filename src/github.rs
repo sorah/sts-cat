@@ -47,12 +47,15 @@ impl GitHubClient {
             .map_err(|e| Error::Internal(Box::new(e)))?
             .as_secs();
 
-        let header = serde_json::json!({"alg": "RS256", "typ": "JWT"});
-        let claims = serde_json::json!({
-            "iss": self.app_id,
-            "iat": now - 60,   // 60s clock skew allowance
-            "exp": now + 540,  // 10 minutes total (GitHub's max)
-        });
+        let header = JwtHeader {
+            alg: "RS256",
+            typ: "JWT",
+        };
+        let claims = JwtClaims {
+            iss: self.app_id,
+            iat: now - 60,  // 60s clock skew allowance
+            exp: now + 540, // 10 minutes total (GitHub's max)
+        };
 
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let header_b64 = engine.encode(serde_json::to_vec(&header).unwrap());
@@ -113,12 +116,11 @@ impl GitHubClient {
         path: &str,
     ) -> Result<String, Error> {
         // Create a scoped read-only token for fetching the policy file
+        let read_permissions = crate::trust_policy::Permissions {
+            inner: [("contents".into(), "read".into())].into(),
+        };
         let read_token = self
-            .create_installation_token_raw(
-                installation_id,
-                &serde_json::json!({"contents": "read"}),
-                &[repo.to_owned()],
-            )
+            .create_installation_token_raw(installation_id, &read_permissions, &[repo.to_owned()])
             .await?;
 
         // Fetch the file content using the scoped token
@@ -159,17 +161,14 @@ impl GitHubClient {
         permissions: &crate::trust_policy::Permissions,
         repositories: &[String],
     ) -> Result<String, Error> {
-        let permissions_json =
-            serde_json::to_value(&permissions.inner).map_err(|e| Error::Internal(Box::new(e)))?;
-
-        self.create_installation_token_raw(installation_id, &permissions_json, repositories)
+        self.create_installation_token_raw(installation_id, permissions, repositories)
             .await
     }
 
     async fn create_installation_token_raw(
         &self,
         installation_id: u64,
-        permissions: &serde_json::Value,
+        permissions: &crate::trust_policy::Permissions,
         repositories: &[String],
     ) -> Result<String, Error> {
         let jwt = self.app_jwt().await?;
@@ -177,10 +176,10 @@ impl GitHubClient {
         let url =
             format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
 
-        let mut body = serde_json::json!({"permissions": permissions});
-        if !repositories.is_empty() {
-            body["repositories"] = serde_json::json!(repositories);
-        }
+        let body = CreateTokenRequest {
+            permissions,
+            repositories,
+        };
 
         let resp = self
             .http
@@ -264,6 +263,26 @@ fn decode_content(encoded: &str) -> Result<String, Error> {
         .decode(&cleaned)
         .map_err(|e| Error::Internal(Box::new(e)))?;
     String::from_utf8(bytes).map_err(|e| Error::Internal(Box::new(e)))
+}
+
+#[derive(serde::Serialize)]
+struct JwtHeader {
+    alg: &'static str,
+    typ: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct JwtClaims {
+    iss: u64,
+    iat: u64,
+    exp: u64,
+}
+
+#[derive(serde::Serialize)]
+struct CreateTokenRequest<'a> {
+    permissions: &'a crate::trust_policy::Permissions,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    repositories: &'a [String],
 }
 
 #[derive(serde::Deserialize)]

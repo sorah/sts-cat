@@ -136,8 +136,13 @@ pub async fn handle_exchange(
     Ok(axum::Json(ExchangeResponse { token }))
 }
 
-pub async fn handle_healthz() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({"ok": true}))
+#[derive(serde::Serialize)]
+pub struct HealthResponse {
+    ok: bool,
+}
+
+pub async fn handle_healthz() -> axum::Json<HealthResponse> {
+    axum::Json(HealthResponse { ok: true })
 }
 
 fn parse_scope(scope: &str) -> Result<(String, String, bool), Error> {
