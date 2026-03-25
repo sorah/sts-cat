@@ -3,6 +3,13 @@ pub struct Config {
     #[arg(long, env = "STS_CAT_GITHUB_APP_ID")]
     pub github_app_id: u64,
 
+    #[arg(
+        long,
+        default_value = "https://api.github.com",
+        env = "STS_CAT_GITHUB_API_URL"
+    )]
+    pub github_api_url: String,
+
     #[arg(long, env = "STS_CAT_DOMAIN")]
     pub domain: String,
 

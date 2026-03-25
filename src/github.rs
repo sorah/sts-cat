@@ -12,12 +12,17 @@ const PATH_SEGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::
     .remove(b'~');
 pub struct GitHubClient {
     http: reqwest::Client,
+    base_url: String,
     app_id: u64,
     signer: std::sync::Arc<dyn crate::signer::Signer>,
 }
 
 impl GitHubClient {
-    pub fn new(app_id: u64, signer: std::sync::Arc<dyn crate::signer::Signer>) -> Self {
+    pub fn new(
+        base_url: &str,
+        app_id: u64,
+        signer: std::sync::Arc<dyn crate::signer::Signer>,
+    ) -> Self {
         use reqwest::header;
 
         let mut headers = header::HeaderMap::new();
@@ -41,6 +46,7 @@ impl GitHubClient {
 
         Self {
             http,
+            base_url: base_url.trim_end_matches('/').to_owned(),
             app_id,
             signer,
         }
@@ -79,8 +85,10 @@ impl GitHubClient {
         let jwt = self.app_jwt().await?;
 
         for page in 1..=MAX_PAGES {
-            let url =
-                format!("https://api.github.com/app/installations?per_page={PER_PAGE}&page={page}");
+            let url = format!(
+                "{}/app/installations?per_page={PER_PAGE}&page={page}",
+                self.base_url
+            );
 
             let resp = self
                 .http
@@ -140,7 +148,8 @@ impl GitHubClient {
             .collect::<Vec<_>>()
             .join("/");
         let url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{encoded_path}",
+            "{}/repos/{}/{}/contents/{encoded_path}",
+            self.base_url,
             percent_encoding::utf8_percent_encode(owner, PATH_SEGMENT_ENCODE_SET),
             percent_encoding::utf8_percent_encode(repo, PATH_SEGMENT_ENCODE_SET),
         );
@@ -192,8 +201,10 @@ impl GitHubClient {
     ) -> Result<String, Error> {
         let jwt = self.app_jwt().await?;
 
-        let url =
-            format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
+        let url = format!(
+            "{}/app/installations/{installation_id}/access_tokens",
+            self.base_url
+        );
 
         let body = CreateTokenRequest {
             permissions,
@@ -242,7 +253,7 @@ impl GitHubClient {
     async fn revoke_token(&self, token: &str) {
         let resp = self
             .http
-            .delete("https://api.github.com/installation/token")
+            .delete(format!("{}/installation/token", self.base_url))
             .bearer_auth(token)
             .send()
             .await;
@@ -367,7 +378,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
     async fn test_app_jwt_structure() {
         use base64::Engine as _;
 
-        let client = GitHubClient::new(12345, test_signer());
+        let client = GitHubClient::new("https://api.github.com", 12345, test_signer());
         let jwt = client.app_jwt().await.unwrap();
 
         // JWT has three dot-separated parts
@@ -413,7 +424,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
 
     #[tokio::test]
     async fn test_app_jwt_verifiable() {
-        let client = GitHubClient::new(99999, test_signer());
+        let client = GitHubClient::new("https://api.github.com", 99999, test_signer());
         let jwt = client.app_jwt().await.unwrap();
 
         let pub_pem = test_public_key_pem();

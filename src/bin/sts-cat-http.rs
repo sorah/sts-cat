@@ -25,7 +25,8 @@ async fn main() -> anyhow::Result<()> {
     let config = sts_cat::config::Config::parse();
 
     let signer = config.build_signer().await?;
-    let github = sts_cat::github::GitHubClient::new(config.github_app_id, signer);
+    let github =
+        sts_cat::github::GitHubClient::new(&config.github_api_url, config.github_app_id, signer);
     let oidc = sts_cat::oidc::OidcVerifier::new();
 
     let policy_cache = moka::future::Cache::builder()
