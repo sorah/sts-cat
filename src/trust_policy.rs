@@ -20,20 +20,15 @@ pub struct Permissions {
 }
 
 pub struct CompiledTrustPolicy {
-    issuer: IssuerMatch,
-    subject: SubjectMatch,
+    issuer: StringMatcher,
+    subject: StringMatcher,
     audience: AudienceMatch,
     claim_patterns: Vec<(String, regex::Regex)>,
     pub permissions: Permissions,
     pub repositories: Option<Vec<String>>,
 }
 
-enum IssuerMatch {
-    Exact(String),
-    Pattern(regex::Regex),
-}
-
-enum SubjectMatch {
+enum StringMatcher {
     Exact(String),
     Pattern(regex::Regex),
 }
@@ -50,6 +45,109 @@ pub struct Actor {
     pub matched_claims: Vec<(String, String)>,
 }
 
+impl StringMatcher {
+    fn compile(
+        exact: Option<String>,
+        pattern: Option<String>,
+        field_name: &str,
+    ) -> Result<Self, Error> {
+        use serde::de::Error as _;
+        match (exact, pattern) {
+            (Some(exact), None) => Ok(StringMatcher::Exact(exact)),
+            (None, Some(pattern)) => {
+                let re = regex::Regex::new(&format!("^{pattern}$"))?;
+                Ok(StringMatcher::Pattern(re))
+            }
+            (Some(_), Some(_)) => Err(Error::PolicyParse(toml::de::Error::custom(format!(
+                "cannot specify both {field_name} and {field_name}_pattern"
+            )))),
+            (None, None) => Err(Error::PolicyParse(toml::de::Error::custom(format!(
+                "must specify either {field_name} or {field_name}_pattern"
+            )))),
+        }
+    }
+
+    fn check(&self, value: &str, field_name: &str) -> Result<(), Error> {
+        match self {
+            StringMatcher::Exact(expected) => {
+                if value != expected {
+                    return Err(Error::PermissionDenied(format!(
+                        "{field_name} did not match"
+                    )));
+                }
+            }
+            StringMatcher::Pattern(re) => {
+                if !re.is_match(value) {
+                    return Err(Error::PermissionDenied(format!(
+                        "{field_name} did not match pattern"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl AudienceMatch {
+    fn compile(exact: Option<String>, pattern: Option<String>) -> Result<Self, Error> {
+        use serde::de::Error as _;
+        match (exact, pattern) {
+            (Some(exact), None) => Ok(AudienceMatch::Exact(exact)),
+            (None, Some(pattern)) => {
+                let re = regex::Regex::new(&format!("^{pattern}$"))?;
+                Ok(AudienceMatch::Pattern(re))
+            }
+            (None, None) => Ok(AudienceMatch::Domain),
+            (Some(_), Some(_)) => Err(Error::PolicyParse(toml::de::Error::custom(
+                "cannot specify both audience and audience_pattern",
+            ))),
+        }
+    }
+
+    fn check<'a>(
+        &self,
+        audiences: impl Iterator<Item = &'a str>,
+        domain: &str,
+    ) -> Result<(), Error> {
+        match self {
+            AudienceMatch::Exact(expected) => {
+                if !audiences.into_iter().any(|a| a == expected) {
+                    return Err(Error::PermissionDenied("audience did not match".into()));
+                }
+            }
+            AudienceMatch::Pattern(re) => {
+                if !audiences.into_iter().any(|a| re.is_match(a)) {
+                    return Err(Error::PermissionDenied(
+                        "audience did not match pattern".into(),
+                    ));
+                }
+            }
+            AudienceMatch::Domain => {
+                if !audiences.into_iter().any(|a| a == domain) {
+                    return Err(Error::PermissionDenied(
+                        "audience did not match domain".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn compile_claim_patterns(
+    patterns: Option<std::collections::HashMap<String, String>>,
+) -> Result<Vec<(String, regex::Regex)>, Error> {
+    let Some(patterns) = patterns else {
+        return Ok(Vec::new());
+    };
+    let mut compiled = Vec::with_capacity(patterns.len());
+    for (name, pattern) in patterns {
+        let re = regex::Regex::new(&format!("^{pattern}$"))?;
+        compiled.push((name, re));
+    }
+    Ok(compiled)
+}
+
 impl TrustPolicy {
     pub fn parse(toml_str: &str) -> Result<Self, Error> {
         let policy: TrustPolicy = toml::from_str(toml_str)?;
@@ -57,80 +155,17 @@ impl TrustPolicy {
     }
 
     pub fn compile(self, is_org_level: bool) -> Result<CompiledTrustPolicy, Error> {
-        use serde::de::Error as _;
-
         if !is_org_level && self.repositories.is_some() {
             return Err(Error::PermissionDenied(
                 "repositories field is not allowed in repository-level trust policies".into(),
             ));
         }
 
-        let issuer = match (self.issuer, self.issuer_pattern) {
-            (Some(exact), None) => IssuerMatch::Exact(exact),
-            (None, Some(pattern)) => {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
-                IssuerMatch::Pattern(re)
-            }
-            (Some(_), Some(_)) => {
-                return Err(Error::PolicyParse(toml::de::Error::custom(
-                    "cannot specify both issuer and issuer_pattern",
-                )));
-            }
-            (None, None) => {
-                return Err(Error::PolicyParse(toml::de::Error::custom(
-                    "must specify either issuer or issuer_pattern",
-                )));
-            }
-        };
-
-        let subject = match (self.subject, self.subject_pattern) {
-            (Some(exact), None) => SubjectMatch::Exact(exact),
-            (None, Some(pattern)) => {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
-                SubjectMatch::Pattern(re)
-            }
-            (Some(_), Some(_)) => {
-                return Err(Error::PolicyParse(toml::de::Error::custom(
-                    "cannot specify both subject and subject_pattern",
-                )));
-            }
-            (None, None) => {
-                return Err(Error::PolicyParse(toml::de::Error::custom(
-                    "must specify either subject or subject_pattern",
-                )));
-            }
-        };
-
-        let audience = match (self.audience, self.audience_pattern) {
-            (Some(exact), None) => AudienceMatch::Exact(exact),
-            (None, Some(pattern)) => {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
-                AudienceMatch::Pattern(re)
-            }
-            (None, None) => AudienceMatch::Domain,
-            (Some(_), Some(_)) => {
-                return Err(Error::PolicyParse(toml::de::Error::custom(
-                    "cannot specify both audience and audience_pattern",
-                )));
-            }
-        };
-
-        let claim_patterns = if let Some(patterns) = self.claim_pattern {
-            let mut compiled = Vec::with_capacity(patterns.len());
-            for (name, pattern) in patterns {
-                let re = regex::Regex::new(&format!("^{pattern}$"))?;
-                compiled.push((name, re));
-            }
-            compiled
-        } else {
-            Vec::new()
-        };
-
         Ok(CompiledTrustPolicy {
-            issuer,
-            subject,
-            audience,
-            claim_patterns,
+            issuer: StringMatcher::compile(self.issuer, self.issuer_pattern, "issuer")?,
+            subject: StringMatcher::compile(self.subject, self.subject_pattern, "subject")?,
+            audience: AudienceMatch::compile(self.audience, self.audience_pattern)?,
+            claim_patterns: compile_claim_patterns(self.claim_pattern)?,
             permissions: self.permissions,
             repositories: self.repositories,
         })
@@ -143,67 +178,30 @@ impl CompiledTrustPolicy {
         claims: &crate::oidc::TokenClaims,
         domain: &str,
     ) -> Result<Actor, Error> {
-        // Defense-in-depth: validate all claim format strings before matching
+        // Defense-in-depth: validate claim format strings before pattern matching
         crate::oidc::validate_issuer(&claims.iss)?;
         crate::oidc::validate_subject(&claims.sub)?;
-        for aud in claims.aud.as_slice() {
+        for aud in claims.aud.iter() {
             crate::oidc::validate_audience(aud)?;
         }
 
-        match &self.issuer {
-            IssuerMatch::Exact(expected) => {
-                if claims.iss != *expected {
-                    return Err(Error::PermissionDenied("issuer did not match".into()));
-                }
-            }
-            IssuerMatch::Pattern(re) => {
-                if !re.is_match(&claims.iss) {
-                    return Err(Error::PermissionDenied(
-                        "issuer did not match pattern".into(),
-                    ));
-                }
-            }
-        }
+        self.issuer.check(&claims.iss, "issuer")?;
+        self.subject.check(&claims.sub, "subject")?;
+        self.audience.check(claims.aud.iter(), domain)?;
+        let matched_claims = self.check_claim_patterns(claims)?;
 
-        match &self.subject {
-            SubjectMatch::Exact(expected) => {
-                if claims.sub != *expected {
-                    return Err(Error::PermissionDenied("subject did not match".into()));
-                }
-            }
-            SubjectMatch::Pattern(re) => {
-                if !re.is_match(&claims.sub) {
-                    return Err(Error::PermissionDenied(
-                        "subject did not match pattern".into(),
-                    ));
-                }
-            }
-        }
+        Ok(Actor {
+            issuer: claims.iss.clone(),
+            subject: claims.sub.clone(),
+            matched_claims,
+        })
+    }
 
-        let audiences = claims.aud.as_slice();
-        match &self.audience {
-            AudienceMatch::Exact(expected) => {
-                if !audiences.iter().any(|a| *a == *expected) {
-                    return Err(Error::PermissionDenied("audience did not match".into()));
-                }
-            }
-            AudienceMatch::Pattern(re) => {
-                if !audiences.iter().any(|a| re.is_match(a)) {
-                    return Err(Error::PermissionDenied(
-                        "audience did not match pattern".into(),
-                    ));
-                }
-            }
-            AudienceMatch::Domain => {
-                if !audiences.contains(&domain) {
-                    return Err(Error::PermissionDenied(
-                        "audience did not match domain".into(),
-                    ));
-                }
-            }
-        }
-
-        let mut matched_claims = Vec::new();
+    fn check_claim_patterns(
+        &self,
+        claims: &crate::oidc::TokenClaims,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let mut matched = Vec::new();
         for (claim_name, pattern) in &self.claim_patterns {
             let value = claims.extra.get(claim_name).ok_or_else(|| {
                 Error::PermissionDenied(format!("required claim '{claim_name}' not present"))
@@ -225,14 +223,9 @@ impl CompiledTrustPolicy {
                 )));
             }
 
-            matched_claims.push((claim_name.clone(), string_value));
+            matched.push((claim_name.clone(), string_value));
         }
-
-        Ok(Actor {
-            issuer: claims.iss.clone(),
-            subject: claims.sub.clone(),
-            matched_claims,
-        })
+        Ok(matched)
     }
 }
 
@@ -310,7 +303,6 @@ mod tests {
         "#;
         let policy = TrustPolicy::parse(toml).unwrap();
         assert!(policy.compile(false).is_err());
-        // But org-level should be fine
         let policy2 = TrustPolicy::parse(toml).unwrap();
         assert!(policy2.compile(true).is_ok());
     }
@@ -409,7 +401,6 @@ mod tests {
         let policy = TrustPolicy::parse(toml).unwrap();
         let compiled = policy.compile(false).unwrap();
 
-        // Matching domain
         let claims = crate::oidc::TokenClaims {
             iss: "https://example.com".into(),
             sub: "sub".into(),
@@ -418,7 +409,6 @@ mod tests {
         };
         assert!(compiled.check_token(&claims, "sts.example.com").is_ok());
 
-        // Non-matching domain
         let claims2 = crate::oidc::TokenClaims {
             iss: "https://example.com".into(),
             sub: "sub".into(),

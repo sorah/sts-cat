@@ -243,11 +243,12 @@ pub enum OneOrMany {
 }
 
 impl OneOrMany {
-    pub fn as_slice(&self) -> Vec<&str> {
-        match self {
-            OneOrMany::One(s) => vec![s.as_str()],
-            OneOrMany::Many(v) => v.iter().map(|s| s.as_str()).collect(),
-        }
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        let slice: &[String] = match self {
+            OneOrMany::One(s) => std::slice::from_ref(s),
+            OneOrMany::Many(v) => v.as_slice(),
+        };
+        slice.iter().map(|s| s.as_str())
     }
 }
 
