@@ -59,7 +59,10 @@ impl AppState {
             .time_to_live(std::time::Duration::from_secs(300))
             .build();
 
-        let installation_cache = moka::future::Cache::builder().max_capacity(200).build();
+        let installation_cache = moka::future::Cache::builder()
+            .max_capacity(200)
+            .time_to_live(std::time::Duration::from_secs(3600))
+            .build();
 
         Ok(std::sync::Arc::new(Self {
             config,
