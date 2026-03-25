@@ -135,7 +135,7 @@ impl AudienceMatch {
 }
 
 fn compile_anchored_regex(pattern: &str) -> Result<regex::Regex, Error> {
-    Ok(regex::Regex::new(&format!("^{pattern}$"))?)
+    Ok(regex::Regex::new(&format!("^(?:{pattern})$"))?)
 }
 
 fn compile_claim_patterns(
@@ -499,5 +499,47 @@ mod tests {
         };
 
         assert!(compiled.check_token(&claims, "sts.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_pattern_alternation_fully_anchored() {
+        let toml = r#"
+            issuer = "https://token.actions.githubusercontent.com"
+            subject_pattern = "repo:myorg/a|repo:myorg/b"
+
+            [permissions]
+            contents = "read"
+        "#;
+        let policy = TrustPolicy::parse(toml).unwrap();
+        let compiled = policy.compile(false).unwrap();
+
+        let make_claims = |sub: &str| crate::oidc::TokenClaims {
+            iss: "https://token.actions.githubusercontent.com".into(),
+            sub: sub.into(),
+            aud: crate::oidc::OneOrMany::One("sts.example.com".into()),
+            extra: std::collections::HashMap::new(),
+        };
+
+        assert!(
+            compiled
+                .check_token(&make_claims("repo:myorg/a"), "sts.example.com")
+                .is_ok()
+        );
+        assert!(
+            compiled
+                .check_token(&make_claims("repo:myorg/b"), "sts.example.com")
+                .is_ok()
+        );
+        // Must not match partial strings
+        assert!(
+            compiled
+                .check_token(&make_claims("repo:myorg/a-extra"), "sts.example.com")
+                .is_err()
+        );
+        assert!(
+            compiled
+                .check_token(&make_claims("prefix-repo:myorg/b"), "sts.example.com")
+                .is_err()
+        );
     }
 }
