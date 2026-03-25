@@ -1,7 +1,7 @@
 pub mod raw;
 
 #[cfg(feature = "aws-kms")]
-pub mod kms;
+pub mod aws_kms;
 
 #[async_trait::async_trait]
 pub trait Signer: Send + Sync {

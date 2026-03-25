@@ -79,7 +79,7 @@ impl Config {
             KeySource::Kms => {
                 let arn = self.kms_key_arn.as_ref().unwrap();
                 Ok(std::sync::Arc::new(
-                    crate::signer::kms::AwsKmsSigner::new(arn.clone()).await?,
+                    crate::signer::aws_kms::AwsKmsSigner::new(arn.clone()).await?,
                 ))
             }
         }
