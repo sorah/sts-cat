@@ -3,4 +3,49 @@ name = "sts-cat"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "sts-cat-http"
+path = "src/bin/sts-cat-http.rs"
+
+[[bin]]
+name = "sts-cat-lambda"
+path = "src/bin/sts-cat-lambda.rs"
+required-features = ["aws-lambda"]
+
+[features]
+aws-kms = ["dep:aws-sdk-kms", "dep:aws-config"]
+aws-lambda = ["dep:lambda_http"]
+
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+backon = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+hex = "0.4"
+jsonwebtoken = "9"
+moka = { version = "0.12", features = ["future"] }
+regex = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+url = "2"
+
+aws-config = { version = "1", optional = true }
+aws-sdk-kms = { version = "1", optional = true, features = ["test-util"] }
+lambda_http = { version = "0.14", optional = true }
+
+[dev-dependencies]
+aws-smithy-mocks = "0.2"
+rsa = { version = "0.9", features = ["pem"] }
+
+[package.metadata.lambda.deploy]
+features = ["aws-lambda"]

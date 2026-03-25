@@ -327,7 +327,7 @@ Numeric claims, arrays, nested objects are all rejected.
 - Response timeout: 30s
 - User-Agent: `sts-cat/<version>`
 - OIDC client: custom redirect policy (validate with `validate_issuer`), response size limiter
-- GitHub client: no redirects (API shouldn't redirect), `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`
+- GitHub client: no redirects (API shouldn't redirect), `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2026-03-10`
 
 #### 12. Installation Lookup Pagination
 
@@ -512,12 +512,12 @@ All external fetches (OIDC discovery, JWKS, trust policy files from GitHub) are 
 
 Token verification flow:
 1. Extract bearer token from `Authorization` header
-2. Decode JWT header to extract issuer (without verifying signature yet)
-3. Validate issuer format (`validate_issuer`)
-4. Fetch OIDC provider metadata from `{issuer}/.well-known/openid-configuration` (cached, with retry)
-5. Fetch JWKS from the provider's `jwks_uri` (cached with provider)
-6. Verify JWT signature, expiry; skip audience check (verified later by trust policy)
-7. Validate request fields (scope non-empty, identity non-empty)
+2. Validate request fields (scope non-empty, identity non-empty) — fail fast on bad requests
+3. Decode JWT header to extract issuer (without verifying signature yet)
+4. Validate issuer format (`validate_issuer`)
+5. Fetch OIDC provider metadata from `{issuer}/.well-known/openid-configuration` (cached, with retry)
+6. Fetch JWKS from the provider's `jwks_uri` (cached with provider)
+7. Verify JWT signature, expiry; skip audience check (verified later by trust policy)
 8. Look up installation ID and trust policy
 9. `check_token`: validate issuer/subject/audience format strings (defense-in-depth), then match against policy rules
 
@@ -572,10 +572,10 @@ pub enum Error {
     RateLimited,                                 // 429
 
     #[error("GitHub API error")]
-    GitHubApi(#[source] reqwest::Error),         // 502 or mapped per status
+    GitHubApi(#[source] reqwest::Error),         // 500
 
     #[error("OIDC discovery error")]
-    OidcDiscovery(#[source] reqwest::Error),     // 502
+    OidcDiscovery(#[source] reqwest::Error),     // 500
 
     #[error("JWT verification failed")]
     JwtVerification(#[from] jsonwebtoken::errors::Error), // 401
@@ -599,7 +599,15 @@ The `IntoResponse` implementation maps each variant to an HTTP status code and a
 
 Use `tracing` with `tracing_subscriber` in JSON format for structured logging. All exchange events are logged with structured fields:
 
-**Success** (INFO level):
+**Authorization passed** (INFO level, logged after trust policy check, before token creation):
+```json
+{"level":"INFO","event":"exchange_authorized","scope":"org/repo","identity":"deploy",
+ "issuer":"https://token.actions.githubusercontent.com",
+ "subject":"repo:org/repo:ref:refs/heads/main",
+ "installation_id":12345,"policy_path":".github/sts-cat/deploy.sts.toml"}
+```
+
+**Success** (INFO level, logged after installation token created):
 ```json
 {"level":"INFO","event":"exchange_success","scope":"org/repo","identity":"deploy",
  "issuer":"https://token.actions.githubusercontent.com",
@@ -748,7 +756,7 @@ pub trait Signer: Send + Sync {
     async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error>;
 }
 
-pub mod file;    // RawSigner: PEM from file or env var
+pub mod raw;     // RawSigner: PEM from file or env var
 #[cfg(feature = "aws-kms")]
 pub mod kms;     // AwsKmsSigner: AWS KMS
 ```
@@ -793,7 +801,7 @@ mod tests {
 ```rust
 pub struct GitHubClient {
     http: reqwest::Client,  // no redirects, Accept: application/vnd.github+json,
-                            // X-GitHub-Api-Version: 2022-11-28, User-Agent: sts-cat/<ver>,
+                            // X-GitHub-Api-Version: 2026-03-10, User-Agent: sts-cat/<ver>,
                             // connect timeout: 10s, response timeout: 30s
     app_id: u64,
     signer: Arc<dyn Signer>,
@@ -869,7 +877,7 @@ impl OidcVerifier {
 
     /// Discover OIDC provider (with exponential backoff retry) and verify a JWT.
     /// Returns the verified token claims.
-    /// Retry: 1s → 2s → 4s → 8s → 16s → 30s max, ±10% jitter.
+    /// Retry: 1s → 2s → 4s → 8s → 16s → 30s max, with jitter.
     /// Permanent errors (no retry): HTTP 400, 401, 403, 404, 405, 406, 410, 415, 422, 501.
     pub async fn verify(&self, token: &str) -> Result<TokenClaims, Error>;
 }
@@ -1074,36 +1082,55 @@ CMD ["sts-cat-http"]
 
 ## Current Status
 
-Interview complete. Ready for implementation.
+Implementation complete.
 
 ### Implementation Checklist
 
-- [ ] `Cargo.toml` — dependencies, features, binary targets
-- [ ] `src/lib.rs` — crate root, module declarations
-- [ ] `src/error.rs` — `Error` enum with `thiserror` and `IntoResponse`
-- [ ] `src/config.rs` — `Config` struct with clap derive, startup validation
-- [ ] `src/signer/mod.rs` — `Signer` trait
-- [ ] `src/signer/raw.rs` — `RawSigner` (PEM from file or env var)
-- [ ] `src/signer/kms.rs` — `AwsKmsSigner` (AWS KMS, behind `aws-kms` feature)
-- [ ] `src/oidc.rs` — OIDC discovery (with redirect validation and retry), JWKS cache, JWT verification
-- [ ] `src/oidc.rs` — `validate_issuer`, `validate_subject`, `validate_audience` (separate functions, different char sets)
-- [ ] `src/trust_policy.rs` — TOML parsing, `compile(is_org_level)`, `check_token` with defense-in-depth validation
-- [ ] `src/trust_policy.rs` — claim type handling: String/Bool only, reject numbers/arrays/objects
-- [ ] `src/github.rs` — GitHub API client with proper headers (`Accept`, `X-GitHub-Api-Version`, `User-Agent`)
-- [ ] `src/github.rs` — App JWT construction, installation lookup (paginated, max 50 pages)
-- [ ] `src/github.rs` — installation token creation with 422/403/429 error handling
-- [ ] `src/github.rs` — token revocation (expect 204, warn on failure, don't propagate)
-- [ ] `src/exchange.rs` — `AppState`, `handle_exchange`, scope parsing
-- [ ] `src/bin/sts-cat-http.rs` — TCP HTTP server entry point
-- [ ] `src/bin/sts-cat-lambda.rs` — Lambda entry point (behind `aws-lambda` feature)
-- [ ] `Dockerfile`
-- [ ] Unit tests: trust policy parsing, compilation (including `repositories` rejection on repo-level)
-- [ ] Unit tests: trust policy matching (issuer, subject, audience, claim types, audience fallback)
-- [ ] Unit tests: OIDC validation (`validate_issuer` full rules, `validate_subject`, `validate_audience` different char sets)
-- [ ] Unit tests: JWT construction and signing
+- [x] `Cargo.toml` — dependencies, features, binary targets
+- [x] `src/lib.rs` — crate root, module declarations
+- [x] `src/error.rs` — `Error` enum with `thiserror` and `IntoResponse`
+- [x] `src/config.rs` — `Config` struct with clap derive, startup validation
+- [x] `src/signer/mod.rs` — `Signer` trait
+- [x] `src/signer/raw.rs` — `RawSigner` (PEM from file or env var)
+- [x] `src/signer/kms.rs` — `AwsKmsSigner` (AWS KMS, behind `aws-kms` feature)
+- [x] `src/oidc.rs` — OIDC discovery (with redirect validation and retry), JWKS cache, JWT verification
+- [x] `src/oidc.rs` — `validate_issuer`, `validate_subject`, `validate_audience` (separate functions, different char sets)
+- [x] `src/trust_policy.rs` — TOML parsing, `compile(is_org_level)`, `check_token` with defense-in-depth validation
+- [x] `src/trust_policy.rs` — claim type handling: String/Bool only, reject numbers/arrays/objects
+- [x] `src/github.rs` — GitHub API client with proper headers (`Accept`, `X-GitHub-Api-Version`, `User-Agent`)
+- [x] `src/github.rs` — App JWT construction, installation lookup (paginated, max 50 pages)
+- [x] `src/github.rs` — installation token creation with 422/403/429 error handling
+- [x] `src/github.rs` — token revocation (expect 204, warn on failure, don't propagate)
+- [x] `src/exchange.rs` — `AppState`, `handle_exchange`, scope parsing
+- [x] `src/bin/sts-cat-http.rs` — TCP HTTP server entry point
+- [x] `src/bin/sts-cat-lambda.rs` — Lambda entry point (behind `aws-lambda` feature)
+- [x] `Dockerfile`
+- [x] Unit tests: trust policy parsing, compilation (including `repositories` rejection on repo-level)
+- [x] Unit tests: trust policy matching (issuer, subject, audience, claim types, audience fallback)
+- [x] Unit tests: OIDC validation (`validate_issuer` full rules, `validate_subject`, `validate_audience` different char sets)
+- [x] Unit tests: JWT construction and signing
 - [ ] Integration-style tests: exchange handler with mock GitHub API
-- [ ] `README.md` — setup guide, configuration reference, usage examples
+- [x] `README.md` — setup guide, configuration reference, usage examples
+
+### Discrepancies
+
+- **D1: `error.rs` — `GitHubApi` and `OidcDiscovery` map to 500, spec says 502** — Spec comment says `// 502 or mapped per status` for `GitHubApi` and `// 502` for `OidcDiscovery`, but impl maps both to 500. Resolution: **spec updated** — 500 is correct, clients shouldn't distinguish upstream failures
+- **D2: `error.rs` — logging levels** — Logging levels match intent (debug for 4xx, error for 5xx). Minor: `RateLimited` (429) has no logging at all. Resolution: **accepted** — no action needed
+- **D3: `signer/mod.rs` — submodule named `raw` not `file`** — Spec pseudocode says `pub mod file;`, impl uses `pub mod raw;`. Resolution: **spec updated** — `raw` is better since it covers both file and env sources
+- **D4: `signer/kms.rs` — tests are TODO stub** — Spec describes KMS tests with aws-smithy-mocks. Impl has only `// TODO`. Resolution: **fixed** — added `test_kms_sign_success` and `test_kms_sign_error` tests using aws-smithy-mocks with `from_client` constructor
+- **D5: `oidc.rs` — `is_permanent_error` uses string matching** — Fragile string matching on error messages for retry classification. Resolution: **fixed** — added `OidcHttpError(u16)` variant, `is_permanent_error` now uses typed status code matching
+- **D6: `oidc.rs` — retry jitter is full jitter not ±10%** — `backon::with_jitter()` uses full jitter, spec says ±10%. Resolution: **accepted** — full jitter is standard practice
+- **D7: `exchange.rs` — extra `exchange_authorized` log event** — Impl logs both `exchange_authorized` and `exchange_success`. Resolution: **spec updated** — useful to know authorization passed even if token creation later fails
+- **D8: `exchange.rs` — no structured denial audit log** — No `exchange_denied` event with scope/identity/issuer/subject/reason. Resolution: **fixed** — added WARN-level `exchange_denied` log with scope/identity/issuer/subject/reason fields when `check_token` fails
+- **D9: `github.rs` — no 100 KiB limit on trust policy fetch** — OIDC uses `read_limited_body` but GitHub contents fetch has no size limit. Resolution: **fixed** — added `read_limited_body` (made `pub(crate)`) call in `get_trust_policy_content`
+- **D10: `github.rs` — passes `owner/repo` instead of repo ID to installation token API** — GitHub expects repo names without owner prefix, or numeric IDs. Resolution: **fixed** — changed to pass just repo name
+- **D11: `oidc.rs` — `read_limited_body` doesn't stream-limit** — Reads entire body then checks size; doesn't protect during reading. Resolution: **fixed** — now uses `bytes_stream()` with chunk-by-chunk size tracking via `futures-util::StreamExt`
+- **D12: `exchange.rs` — request field validation before OIDC verification** — Spec has validation after OIDC; impl validates early. Resolution: **spec updated** — fail fast on bad requests is better
+- **D13: `config.rs` — startup validation in `build_signer` not `config.rs`** — Validation happens at startup but in binary entrypoints. Resolution: **fixed** — moved `build_signer` to `Config::build_signer()` method in `config.rs`
+- **D14: `build_signer` duplicated between binaries** — Identical code in both binaries. Resolution: **fixed** — both binaries now call `config.build_signer()`
 
 ### Updates
 
-Implementors MUST keep this section updated as they work.
+- 2026-03-26: Initial implementation complete. All core modules implemented per spec. 34 unit tests passing (OIDC validation, trust policy parsing/compilation/matching, scope parsing, claim type handling, JWT construction and signature verification using RFC 9500 test key). Zero clippy warnings. Integration-style exchange handler tests deferred — require mock GitHub API server.
+- 2026-03-26: Validation started. 14 discrepancies identified. 5 resolved as spec updates (D1, D3, D6, D7, D12), 1 accepted (D2), 8 require implementation fixes (D4, D5, D8, D9, D10, D11, D13, D14).
+- 2026-03-26: All 8 implementation fixes completed (D4, D5, D8, D9, D10, D11, D13, D14). 36 tests passing with `aws-kms` feature (34 base + 2 KMS). Zero clippy warnings. Zero fmt issues.

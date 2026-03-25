@@ -1,3 +1,154 @@
 # sts-cat
 
-Clone of [octo-sts](https://github.com/octo-sts/app) but simplified self-hosting experience. Works with non-GCP environment while biased to AWS but works without a cloud provider.
+OIDC-to-GitHub-token exchange service. A Rust reimplementation of [octo-sts](https://github.com/octo-sts/app) designed for easy self-hosting on AWS (Lambda, ECS) or any environment with a TCP socket.
+
+sts-cat accepts OIDC JWT tokens from any identity provider, validates them against trust policies stored in GitHub repositories, and returns scoped GitHub installation access tokens.
+
+## Setup
+
+### Prerequisites
+
+- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with the desired permissions
+- The GitHub App's private key (PEM file) or an AWS KMS asymmetric signing key
+
+### Configuration
+
+All configuration is via environment variables:
+
+| Variable | Required | Description |
+|---|---|---|
+| `STS_CAT_GITHUB_APP_ID` | Yes | GitHub App ID |
+| `STS_CAT_DOMAIN` | Yes | Domain name used as default audience (e.g. `sts.example.com`) |
+| `STS_CAT_HOST` / `HOST` | No | Listen host (default: `0.0.0.0`). Ignored in Lambda mode. |
+| `STS_CAT_PORT` / `PORT` | No | Listen port (default: `8080`). Ignored in Lambda mode. |
+| `STS_CAT_KEY_SOURCE` | Yes | Signing key source: `file`, `env`, or `kms` |
+| `STS_CAT_KEY_FILE` | When `file` | Path to the GitHub App PEM private key |
+| `STS_CAT_KEY_ENV` | When `env` | Name of env var containing the PEM private key |
+| `STS_CAT_KMS_KEY_ARN` | When `kms` | ARN of the AWS KMS asymmetric signing key |
+| `STS_CAT_POLICY_PATH_PREFIX` | No | Path prefix within repos for trust policy files (default: `.github/sts-cat`) |
+| `STS_CAT_POLICY_FILE_EXTENSION` | No | File extension for trust policy files (default: `.sts.toml`) |
+
+### Running
+
+```bash
+# HTTP server mode
+STS_CAT_GITHUB_APP_ID=12345 \
+STS_CAT_DOMAIN=sts.example.com \
+STS_CAT_KEY_SOURCE=file \
+STS_CAT_KEY_FILE=/path/to/private-key.pem \
+sts-cat-http
+
+# Docker
+docker run \
+  -e STS_CAT_GITHUB_APP_ID=12345 \
+  -e STS_CAT_DOMAIN=sts.example.com \
+  -e STS_CAT_KEY_SOURCE=file \
+  -e STS_CAT_KEY_FILE=/app/private-key.pem \
+  -v /path/to/private-key.pem:/app/private-key.pem:ro \
+  sts-cat
+```
+
+### Lambda Deployment
+
+Build with the `aws-lambda` feature:
+
+```bash
+cargo lambda build --release
+```
+
+Deploy the `sts-cat-lambda` binary as a Lambda function with Function URL (`AuthType=NONE`).
+
+## API
+
+### Token Exchange
+
+```
+POST /token HTTP/1.1
+Authorization: Bearer <oidc-jwt>
+Content-Type: application/json
+
+{"scope": "org/repo", "identity": "my-policy"}
+```
+
+Response:
+
+```json
+{"token": "ghs_xxx..."}
+```
+
+- `scope`: `"org/repo"` for repository-level, or `"org"` for organization-level policies
+- `identity`: Name of the trust policy file (without extension)
+
+### Health Check
+
+```
+GET /healthz
+```
+
+Returns `{"ok": true}` with HTTP 200.
+
+## Trust Policies
+
+Trust policies are TOML files stored at `{policy_path_prefix}/{identity}{policy_file_extension}` in the target repository (or the `.github` repo for org-level policies).
+
+### Repository-level example
+
+`.github/sts-cat/deploy.sts.toml`:
+
+```toml
+issuer = "https://token.actions.githubusercontent.com"
+subject = "repo:myorg/myrepo:ref:refs/heads/main"
+
+[permissions]
+contents = "read"
+pull_requests = "write"
+```
+
+### Organization-level example
+
+In the `.github` repo, `.github/sts-cat/ci.sts.toml`:
+
+```toml
+issuer = "https://token.actions.githubusercontent.com"
+subject_pattern = "repo:myorg/.*:ref:refs/heads/main"
+repositories = ["repo-a", "repo-b"]
+
+[permissions]
+contents = "read"
+```
+
+### Trust Policy Fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `issuer` | string | One of `issuer`/`issuer_pattern` | Exact match for the OIDC token issuer |
+| `issuer_pattern` | string | | Regex pattern for issuer |
+| `subject` | string | One of `subject`/`subject_pattern` | Exact match for the OIDC token subject |
+| `subject_pattern` | string | | Regex pattern for subject |
+| `audience` | string | Optional | Exact match for at least one token audience |
+| `audience_pattern` | string | | Regex pattern for audience |
+| `claim_pattern` | table | Optional | Map of claim names to regex patterns |
+| `permissions` | table | Required | GitHub permission keys and access levels |
+| `repositories` | array | Org-level only | Scoped list of repositories |
+
+All regex patterns use Rust `regex` crate syntax and are automatically anchored with `^...$`.
+
+## Building
+
+```bash
+# Default (HTTP server only)
+cargo build --release
+
+# With AWS KMS support
+cargo build --release --features aws-kms
+
+# Lambda binary
+cargo build --release --features aws-lambda
+```
+
+## Feature Flags
+
+| Feature | Default | Description |
+|---|---|---|
+| `aws-kms` | Off | Enables AWS KMS signer |
+| `aws-lambda` | Off | Enables `sts-cat-lambda` binary |
