@@ -13,7 +13,7 @@ require 'uri'
 require 'base64'
 
 base_url = ARGV[0] || 'https://sts-cat.lo.nkmiusercontent.com:1443'
-audience = ARGV[1] || URI.parse(base_url).host
+audience = ARGV[1] || "https://#{URI.parse(base_url).host}"
 
 sts = Aws::STS::Client.new(region: ENV.fetch('AWS_REGION', 'ap-northeast-1'))
 
@@ -25,7 +25,8 @@ resp = sts.get_web_identity_token(
 token = resp.web_identity_token
 
 parts = token.split('.')
-payload = JSON.parse(Base64.urlsafe_decode64(parts[1] + '=' * (4 - parts[1].length % 4)))
+padded = parts[1] + '=' * ((4 - parts[1].length % 4) % 4)
+payload = JSON.parse(Base64.urlsafe_decode64(padded))
 puts "  iss: #{payload['iss']}"
 puts "  sub: #{payload['sub']}"
 puts "  aud: #{payload['aud']}"
