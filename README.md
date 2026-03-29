@@ -199,3 +199,11 @@ cargo lambda build --release
 |---|---|---|
 | `aws-kms` | On | Enables AWS KMS signer |
 | `aws-lambda` | On | Enables `sts-cat-lambda` binary |
+
+## License
+
+(c) Sorah Fukumori https://sorah.jp/
+
+Apache 2.0 License unless otherwise noted.
+
+- Code snippets in this README are licensed under CC0-1.0 universal. https://spdx.org/licenses/CC0-1.0.html
