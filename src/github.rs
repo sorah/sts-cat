@@ -14,14 +14,14 @@ const PATH_SEGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::
 pub struct GitHubClient {
     http: reqwest::Client,
     base_url: String,
-    app_id: u64,
+    app_id: String,
     signer: std::sync::Arc<dyn crate::signer::Signer>,
 }
 
 impl GitHubClient {
     pub fn new(
         base_url: &str,
-        app_id: u64,
+        app_id: &str,
         signer: std::sync::Arc<dyn crate::signer::Signer>,
     ) -> Self {
         use reqwest::header;
@@ -48,7 +48,7 @@ impl GitHubClient {
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_owned(),
-            app_id,
+            app_id: app_id.to_owned(),
             signer,
         }
     }
@@ -67,7 +67,7 @@ impl GitHubClient {
             typ: "JWT",
         };
         let claims = JwtClaims {
-            iss: self.app_id,
+            iss: self.app_id.clone(),
             iat: now - 60,  // 60s clock skew allowance
             exp: now + 540, // 10 minutes total (GitHub's max)
         };
@@ -309,7 +309,7 @@ struct JwtHeader {
 
 #[derive(serde::Serialize)]
 struct JwtClaims {
-    iss: u64,
+    iss: String,
     iat: u64,
     exp: u64,
 }
@@ -385,7 +385,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
         use base64::Engine as _;
         use secrecy::ExposeSecret as _;
 
-        let client = GitHubClient::new("https://api.github.com", 12345, test_signer());
+        let client = GitHubClient::new("https://api.github.com", "12345", test_signer());
         let jwt = client.app_jwt().await.unwrap();
         let jwt_str = jwt.expose_secret();
 
@@ -400,7 +400,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
 
         let claims_bytes = engine.decode(parts[1]).unwrap();
         let claims: serde_json::Value = serde_json::from_slice(&claims_bytes).unwrap();
-        assert_eq!(claims["iss"], 12345);
+        assert_eq!(claims["iss"], "12345");
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -431,7 +431,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
     async fn test_app_jwt_verifiable() {
         use secrecy::ExposeSecret as _;
 
-        let client = GitHubClient::new("https://api.github.com", 99999, test_signer());
+        let client = GitHubClient::new("https://api.github.com", "99999", test_signer());
         let jwt = client.app_jwt().await.unwrap();
 
         let pub_pem = test_public_key_pem();
@@ -447,7 +447,7 @@ UjmopwKBgAqB2KYYMUqAOvYcBnEfLDmyZv9BTVNHbR2lKkMYqv5LlvDaBxVfilE0
         )
         .unwrap();
 
-        assert_eq!(token_data.claims["iss"], 99999);
+        assert_eq!(token_data.claims["iss"], "99999");
     }
 
     #[tokio::test]

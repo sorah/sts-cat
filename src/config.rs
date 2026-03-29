@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, clap::Parser)]
 pub struct Config {
     #[arg(long, env = "STS_CAT_GITHUB_APP_ID")]
-    pub github_app_id: u64,
+    pub github_app_id: String,
 
     #[arg(
         long,

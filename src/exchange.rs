@@ -51,7 +51,7 @@ impl AppState {
     ) -> Result<std::sync::Arc<Self>, anyhow::Error> {
         let signer = config.build_signer().await?;
         let github =
-            crate::github::GitHubClient::new(&config.github_api_url, config.github_app_id, signer);
+            crate::github::GitHubClient::new(&config.github_api_url, &config.github_app_id, signer);
         let oidc = crate::oidc::OidcVerifier::new(config.allowed_issuer_urls.clone());
 
         let policy_cache = moka::future::Cache::builder()
