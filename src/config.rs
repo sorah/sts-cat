@@ -31,10 +31,10 @@ pub struct Config {
     #[cfg(feature = "aws-kms")]
     #[arg(
         long,
-        env = "STS_CAT_KMS_KEY_ARN",
+        env = "STS_CAT_AWS_KMS_KEY_ARN",
         required_if_eq("key_source", "aws-kms")
     )]
-    pub kms_key_arn: Option<String>,
+    pub aws_kms_key_arn: Option<String>,
 
     #[arg(
         long,
@@ -84,7 +84,7 @@ impl Config {
             }
             #[cfg(feature = "aws-kms")]
             KeySource::AwsKms => {
-                let arn = self.kms_key_arn.as_ref().unwrap();
+                let arn = self.aws_kms_key_arn.as_ref().unwrap();
                 Ok(std::sync::Arc::new(
                     crate::signer::aws_kms::AwsKmsSigner::new(arn.clone()).await?,
                 ))
