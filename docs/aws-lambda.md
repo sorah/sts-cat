@@ -14,6 +14,42 @@ cargo lambda build --release
 - An IAM role for the Lambda function
 - Terraform >= 1.0
 
+## KMS Key
+
+Create an external KMS key for importing the GitHub App's RSA private key:
+
+```hcl
+resource "aws_kms_external_key" "sts_cat" {
+  description = "sts-cat key"
+  key_spec    = "RSA_2048"
+  policy      = data.aws_iam_policy_document.sts_cat_kms.json
+  key_usage   = "SIGN_VERIFY"
+}
+
+data "aws_iam_policy_document" "sts_cat_kms" {
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+}
+
+resource "aws_kms_alias" "sts_cat" {
+  name          = "alias/sts-cat"
+  target_key_id = aws_kms_external_key.sts_cat.id
+}
+```
+
+Then import the GitHub App's PEM private key into the KMS key:
+
+```bash
+ruby contrib/aws-kms-import-pem.rb <kms-key-arn> <path-to-private-key.pem>
+```
+
 ## IAM Role
 
 The Lambda execution role needs the following in addition to the basic Lambda policies:
