@@ -260,6 +260,11 @@ pub fn build_router(state: std::sync::Arc<AppState>) -> axum::Router {
                 next.run(req).await
             },
         ))
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().on_response(
+                tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
+            ),
+        )
         .layer(axum::middleware::from_fn(
             move |req, next: axum::middleware::Next| {
                 let val = server_header.clone();

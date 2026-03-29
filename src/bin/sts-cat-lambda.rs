@@ -4,7 +4,12 @@ async fn main() -> anyhow::Result<()> {
     use clap::Parser as _;
 
     let config = sts_cat::config::Config::parse();
-    sts_cat::init_tracing(config.log_json);
+    if config.log_json {
+        // SAFETY: called before any other threads are spawned (prior to
+        // lambda_http::run and tracing init).
+        unsafe { std::env::set_var("AWS_LAMBDA_LOG_FORMAT", "JSON") };
+    }
+    lambda_http::tracing::init_default_subscriber();
 
     let state = sts_cat::exchange::AppState::build(config).await?;
     let router =

@@ -2874,6 +2874,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -3168,6 +3169,7 @@ dependencies = [
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
