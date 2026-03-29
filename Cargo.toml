@@ -1,6 +1,6 @@
 [package]
 name = "sts-cat"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Sorah Fukumori <her@sorah.jp>"]
 description = "Yet another GitHub STS, aims to be easy-self-hosting and cloud-agnostic"
 keywords = ["github", "oidc", "security"]
