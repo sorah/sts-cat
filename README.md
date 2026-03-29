@@ -2,14 +2,14 @@
 
 OIDC-to-GitHub-token exchange service. A Rust reimplementation of [octo-sts](https://github.com/octo-sts/app) designed for easy self-hosting on AWS (Lambda, ECS) or any environment with a TCP socket.
 
-sts-cat accepts OIDC JWT tokens from any identity provider, validates them against trust policies stored in GitHub repositories, and returns scoped GitHub installation access tokens.
+sts-cat accepts OIDC ID tokens from any identity provider, validates them against trust policies stored in GitHub repositories, and returns scoped GitHub installation access tokens.
 
 ## Setup
 
 ### Prerequisites
 
-- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with the desired permissions
-- The GitHub App's private key (PEM file) or an AWS KMS asymmetric signing key
+- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with the desired permissions, and installed on target repositories
+- The GitHub App's private key
 
 ### Configuration
 
@@ -41,83 +41,17 @@ STS_CAT_IDENTIFIER=https://sts.example.com \
 STS_CAT_KEY_SOURCE=file \
 STS_CAT_KEY_FILE=/path/to/private-key.pem \
 sts-cat-http
-
-# Docker
-docker run \
-  -e STS_CAT_GITHUB_APP_ID=12345 \
-  -e STS_CAT_IDENTIFIER=https://sts.example.com \
-  -e STS_CAT_KEY_SOURCE=file \
-  -e STS_CAT_KEY_FILE=/app/private-key.pem \
-  -v /path/to/private-key.pem:/app/private-key.pem:ro \
-  sts-cat
 ```
 
-### AWS Lambda Deployment
+### Deploy to AWS Lambda
 
-Build with cargo-lambda:
+Build with cargo-lambda, and deploy as a function with a function URL.
 
 ```bash
 cargo lambda build --release
 ```
 
 A Terraform module and prebuilt Lambda zip packages are also available. See [docs/aws-lambda.md](docs/aws-lambda.md) for full deployment instructions including IAM role, KMS key setup, and the Terraform module reference.
-
-## API
-
-### Token Exchange
-
-```
-POST /token HTTP/1.1
-Authorization: Bearer <oidc-jwt>
-Content-Type: application/json
-
-{"scope": "org/repo", "identity": "my-policy"}
-```
-
-Response:
-
-```json
-{"token": "ghs_xxx..."}
-```
-
-- `scope`: `"org/repo"` for repository-level, or `"org"` for organization-level policies
-- `identity`: Name of the trust policy file (without extension)
-
-### Health Check
-
-```
-GET /healthz
-```
-
-Returns `{"ok": true}` with HTTP 200.
-
-### Usage from GitHub Actions
-
-A reusable composite action is provided at [`.github/actions/exchange-token`](.github/actions/exchange-token/action.yml):
-
-```yaml
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - name: Get token from sts-cat
-        id: sts-cat
-        uses: sorah/sts-cat/.github/actions/exchange-token@main
-        with:
-          endpoint: https://sts.example.com
-          scope: ${{ github.repository }}
-          identity: deploy
-
-      - name: Use the token
-        env:
-          GITHUB_TOKEN: ${{ steps.sts-cat.outputs.token }}
-        run: |
-          gh api repos/myorg/myrepo/pulls
-```
-
-The `audience` input defaults to the `endpoint` URL and must match the `STS_CAT_IDENTIFIER` value (or the `audience` field in the trust policy). Override it with the `audience` input if they differ.
 
 ## Trust Policies
 
@@ -166,6 +100,66 @@ contents = "read"
 
 All regex patterns use Rust `regex` crate syntax and are automatically anchored with `^...$`.
 
+## Using from GitHub Actions
+
+Typical scenario includes a cross-repository access on GitHub Actions workflows. For that specific scenario, a reusable composite action using [github-script](https://github.com/actions/github-script) is provided at [`.github/actions/exchange-token`](.github/actions/exchange-token/action.yml).
+
+We've made this intentionally a single file, short and simple composite workflow. If you're concerned about the GitHub Actions supply chain risk, you can copy this file into your own repository instead.
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: sorah/sts-cat/.github/actions/exchange-token@main # don't forget to pin a commit!
+        id: sts-cat
+        with:
+          endpoint: https://sts.example.com
+          scope: contoso/central-repo
+          identity: deploy # => .github/sts-cat/deploy.sts.toml in contoso/central-repo (in default configuration)
+
+      - name: Use the token
+        run: |
+            gh api repos/myorg/myrepo/pulls
+        env:
+          GITHUB_TOKEN: ${{ steps.sts-cat.outputs.token }}
+```
+
+The `audience` input defaults to the `endpoint` URL and must match the `STS_CAT_IDENTIFIER` value (or the `audience` field in the trust policy). Override it with the `audience` input if they differ.
+
+## API
+
+### Token Exchange
+
+```
+POST /token HTTP/1.1
+Authorization: Bearer <oidc-jwt>
+Content-Type: application/json
+
+{"scope": "org/repo", "identity": "my-policy"}
+```
+
+Response:
+
+```json
+{"token": "ghs_xxx..."}
+```
+
+- `scope`: `"org/repo"` for repository-level, or `"org"` for organization-level policies
+- `identity`: Name of the trust policy file (without extension)
+
+### Health Check
+
+```
+GET /healthz
+```
+
+Returns `{"ok": true}` with HTTP 200.
+
+
+
 ## Building
 
 ```bash
@@ -179,7 +173,7 @@ cargo build --release --no-default-features
 cargo lambda build --release
 ```
 
-## Feature Flags
+### Feature Flags
 
 | Feature | Default | Description |
 |---|---|---|
@@ -192,4 +186,6 @@ cargo lambda build --release
 
 Apache 2.0 License unless otherwise noted.
 
-- Code snippets in this README are licensed under CC0-1.0 universal. https://spdx.org/licenses/CC0-1.0.html
+- Codes in CC0-1.0 universal: https://spdx.org/licenses/CC0-1.0.html
+    - Code snippets in this README
+    - Files under `.github/actions/exchange-token/`
