@@ -26,6 +26,7 @@ impl AwsKmsSigner {
 #[cfg(feature = "aws-kms")]
 #[async_trait::async_trait]
 impl crate::signer::Signer for AwsKmsSigner {
+    #[tracing::instrument(skip_all)]
     async fn sign(
         &self,
         message: &[u8],

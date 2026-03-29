@@ -53,6 +53,7 @@ impl GitHubClient {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn app_jwt(&self) -> Result<secrecy::SecretString, Error> {
         use base64::Engine as _;
         use secrecy::ExposeSecret as _;
@@ -85,6 +86,7 @@ impl GitHubClient {
         )))
     }
 
+    #[tracing::instrument(skip_all, fields(owner))]
     pub async fn get_installation_id(&self, owner: &str) -> Result<u64, Error> {
         use secrecy::ExposeSecret as _;
         let jwt = self.app_jwt().await?;
@@ -128,6 +130,7 @@ impl GitHubClient {
         )))
     }
 
+    #[tracing::instrument(skip_all, fields(owner, repo, path))]
     pub async fn get_trust_policy_content(
         &self,
         installation_id: u64,
@@ -197,6 +200,7 @@ impl GitHubClient {
             .await
     }
 
+    #[tracing::instrument(skip_all, fields(installation_id))]
     async fn create_installation_token_raw(
         &self,
         installation_id: u64,
@@ -255,6 +259,7 @@ impl GitHubClient {
         Ok(secrecy::SecretBox::new(Box::new(token_resp.token)))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn revoke_token(&self, token: &crate::exchange::GitHubToken) {
         use secrecy::ExposeSecret as _;
         let resp = self

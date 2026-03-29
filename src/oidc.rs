@@ -292,6 +292,7 @@ impl OidcVerifier {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(issuer))]
     async fn discover(&self, issuer: &str) -> Result<std::sync::Arc<OidcProvider>, Error> {
         if let Some(provider) = self.cache.get(issuer).await {
             return Ok(provider);
@@ -303,6 +304,7 @@ impl OidcVerifier {
         Ok(provider)
     }
 
+    #[tracing::instrument(skip_all, fields(issuer))]
     async fn discover_with_retry(&self, issuer: &str) -> Result<OidcProvider, Error> {
         use backon::Retryable as _;
 
@@ -321,6 +323,7 @@ impl OidcVerifier {
             .await
     }
 
+    #[tracing::instrument(skip_all, fields(issuer))]
     async fn discover_once(&self, issuer: &str) -> Result<OidcProvider, Error> {
         let discovery_url = format!(
             "{}/.well-known/openid-configuration",
@@ -370,6 +373,7 @@ impl OidcVerifier {
         Ok(OidcProvider { jwks })
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn verify(&self, token: &str) -> Result<TokenClaims, Error> {
         let header = jsonwebtoken::decode_header(token)?;
 
