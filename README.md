@@ -18,7 +18,7 @@ All configuration is via environment variables:
 | Variable | Required | Description |
 |---|---|---|
 | `STS_CAT_GITHUB_APP_ID` | Yes | GitHub App ID |
-| `STS_CAT_DOMAIN` | Yes | Domain name used as default audience (e.g. `sts.example.com`) |
+| `STS_CAT_IDENTIFIER` | Yes | Identifier used as default audience (e.g. `https://sts.example.com`) |
 | `STS_CAT_GITHUB_API_URL` | No | GitHub API base URL (default: `https://api.github.com`) |
 | `HOST` | No | Listen host (default: `0.0.0.0`). Ignored in Lambda mode. |
 | `PORT` | No | Listen port (default: `8080`). Ignored in Lambda mode. |
@@ -37,7 +37,7 @@ All configuration is via environment variables:
 ```bash
 # HTTP server mode
 STS_CAT_GITHUB_APP_ID=12345 \
-STS_CAT_DOMAIN=sts.example.com \
+STS_CAT_IDENTIFIER=https://sts.example.com \
 STS_CAT_KEY_SOURCE=file \
 STS_CAT_KEY_FILE=/path/to/private-key.pem \
 sts-cat-http
@@ -45,7 +45,7 @@ sts-cat-http
 # Docker
 docker run \
   -e STS_CAT_GITHUB_APP_ID=12345 \
-  -e STS_CAT_DOMAIN=sts.example.com \
+  -e STS_CAT_IDENTIFIER=https://sts.example.com \
   -e STS_CAT_KEY_SOURCE=file \
   -e STS_CAT_KEY_FILE=/app/private-key.pem \
   -v /path/to/private-key.pem:/app/private-key.pem:ro \
@@ -105,7 +105,7 @@ jobs:
         id: sts-cat
         with:
           script: |
-            const idToken = await core.getIDToken('sts.example.com');
+            const idToken = await core.getIDToken('https://sts.example.com');
             const resp = await fetch('https://sts.example.com/token', {
               method: 'POST',
               headers: {
@@ -132,7 +132,7 @@ jobs:
           gh api repos/myorg/myrepo/pulls
 ```
 
-The audience passed to `core.getIDToken()` must match the `STS_CAT_DOMAIN` value (or the `audience` field in the trust policy).
+The audience passed to `core.getIDToken()` must match the `STS_CAT_IDENTIFIER` value (or the `audience` field in the trust policy).
 
 ## Trust Policies
 

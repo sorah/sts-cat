@@ -24,9 +24,9 @@ variable "github_app_id" {
   description = "GitHub App ID (STS_CAT_GITHUB_APP_ID)"
 }
 
-variable "domain" {
+variable "identifier" {
   type        = string
-  description = "Domain name used as default audience (STS_CAT_DOMAIN)"
+  description = "Identifier used as default audience for OIDC token validation (STS_CAT_IDENTIFIER)"
 }
 
 variable "aws_kms_key_arn" {

@@ -40,7 +40,7 @@ module "sts_cat" {
   function_name   = "sts-cat"
   iam_role_arn    = aws_iam_role.sts_cat.arn
   github_app_id   = "12345"
-  domain          = "sts.example.com"
+  identifier      = "https://sts.example.com"
   aws_kms_key_arn = aws_kms_key.sts_cat.arn
   architecture    = "arm64"
 
@@ -59,7 +59,7 @@ module "sts_cat" {
 | `source_sha512` | SHA-512 checksum (see release description) | no | |
 | `iam_role_arn` | IAM execution role ARN | yes | |
 | `github_app_id` | GitHub App ID | yes | |
-| `domain` | Default audience domain (`STS_CAT_DOMAIN`) | yes | |
+| `identifier` | Default audience identifier (`STS_CAT_IDENTIFIER`) | yes | |
 | `aws_kms_key_arn` | KMS key ARN for GitHub App signing | yes | |
 | `architecture` | `arm64` or `x86_64` | no | `arm64` |
 | `memory_size` | Memory in MB | no | `256` |

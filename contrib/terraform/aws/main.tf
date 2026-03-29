@@ -4,7 +4,7 @@ locals {
   module_env_vars = merge(
     {
       STS_CAT_GITHUB_APP_ID  = var.github_app_id
-      STS_CAT_DOMAIN         = var.domain
+      STS_CAT_IDENTIFIER     = var.identifier
       STS_CAT_KEY_SOURCE     = "aws-kms"
       STS_CAT_AWS_KMS_KEY_ARN = var.aws_kms_key_arn
       STS_CAT_LOG_JSON       = "true"

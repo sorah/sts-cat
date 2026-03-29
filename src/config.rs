@@ -10,8 +10,8 @@ pub struct Config {
     )]
     pub github_api_url: String,
 
-    #[arg(long, env = "STS_CAT_DOMAIN")]
-    pub domain: String,
+    #[arg(long, env = "STS_CAT_IDENTIFIER")]
+    pub identifier: String,
 
     #[arg(long, default_value = "0.0.0.0", env = "HOST")]
     pub host: String,
@@ -129,7 +129,7 @@ mod tests {
         Config {
             github_app_id: "123".into(),
             github_api_url: "https://api.github.com".into(),
-            domain: "example.com".into(),
+            identifier: "example.com".into(),
             host: "0.0.0.0".into(),
             port: 8080,
             log_json: false,

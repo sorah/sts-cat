@@ -133,7 +133,7 @@ pub async fn handle_exchange(
         compiled
     };
 
-    let actor = match compiled.check_token(&claims, &state.config.domain) {
+    let actor = match compiled.check_token(&claims, &state.config.identifier) {
         Ok(actor) => actor,
         Err(e) => {
             tracing::warn!(

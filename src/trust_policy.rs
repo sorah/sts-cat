@@ -36,7 +36,7 @@ enum StringMatcher {
 enum AudienceMatch {
     Exact(String),
     Pattern(regex::Regex),
-    Domain,
+    Identifier,
 }
 
 pub struct Actor {
@@ -97,7 +97,7 @@ impl AudienceMatch {
                 let re = compile_anchored_regex(&pattern)?;
                 Ok(AudienceMatch::Pattern(re))
             }
-            (None, None) => Ok(AudienceMatch::Domain),
+            (None, None) => Ok(AudienceMatch::Identifier),
             (Some(_), Some(_)) => Err(Error::PolicyParse(toml::de::Error::custom(
                 "cannot specify both audience and audience_pattern",
             ))),
@@ -107,7 +107,7 @@ impl AudienceMatch {
     fn check<'a>(
         &self,
         audiences: impl Iterator<Item = &'a str>,
-        domain: &str,
+        identifier: &str,
     ) -> Result<(), Error> {
         match self {
             AudienceMatch::Exact(expected) => {
@@ -122,10 +122,10 @@ impl AudienceMatch {
                     ));
                 }
             }
-            AudienceMatch::Domain => {
-                if !audiences.into_iter().any(|a| a == domain) {
+            AudienceMatch::Identifier => {
+                if !audiences.into_iter().any(|a| a == identifier) {
                     return Err(Error::PermissionDenied(
-                        "audience did not match domain".into(),
+                        "audience did not match identifier".into(),
                     ));
                 }
             }
@@ -180,7 +180,7 @@ impl CompiledTrustPolicy {
     pub fn check_token(
         &self,
         claims: &crate::oidc::TokenClaims,
-        domain: &str,
+        identifier: &str,
     ) -> Result<Actor, Error> {
         // Defense-in-depth: validate claim format strings before pattern matching
         crate::oidc::validate_issuer(&claims.iss)?;
@@ -191,7 +191,7 @@ impl CompiledTrustPolicy {
 
         self.issuer.check(&claims.iss, "issuer")?;
         self.subject.check(&claims.sub, "subject")?;
-        self.audience.check(claims.aud.iter(), domain)?;
+        self.audience.check(claims.aud.iter(), identifier)?;
         let matched_claims = self.check_claim_patterns(claims)?;
 
         Ok(Actor {
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_audience_fallback_to_domain() {
+    fn test_compile_audience_fallback_to_identifier() {
         let toml = r#"
             issuer = "https://example.com"
             subject = "sub"
@@ -322,7 +322,7 @@ mod tests {
         "#;
         let policy = TrustPolicy::parse(toml).unwrap();
         let compiled = policy.compile(false).unwrap();
-        assert!(matches!(compiled.audience, AudienceMatch::Domain));
+        assert!(matches!(compiled.audience, AudienceMatch::Identifier));
     }
 
     #[test]
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_token_audience_domain_fallback() {
+    fn test_check_token_audience_identifier_fallback() {
         let toml = r#"
             issuer = "https://example.com"
             subject = "sub"
