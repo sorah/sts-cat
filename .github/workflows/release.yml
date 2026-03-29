@@ -1,0 +1,184 @@
+name: release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
+  create-release:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: extract and validate version
+        run: |
+          VERSION_TAG="${{ github.ref_name }}"
+          VERSION="${VERSION_TAG#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Version: ${VERSION}"
+          if ! grep -q "^version = \"${VERSION}\"" Cargo.toml; then
+            echo "::error::Tag version ${VERSION} does not match Cargo.toml"
+            exit 1
+          fi
+      - name: create release
+        run: |
+          if gh release view "v${VERSION}" --json id >/dev/null 2>&1; then
+            echo "release already exists"
+          else
+            gh release create "v${VERSION}" --draft --verify-tag --title "${VERSION}"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-binaries:
+    needs: [create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: sudo apt-get install -y musl-tools || (sudo apt-get update && sudo apt-get install -y musl-tools)
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/setup-cross-toolchain-action@d62f33b587e73b0004731caebc7d2d46b18a7567 # v1.39.2
+        with:
+          target: ${{ matrix.target }}
+      - uses: taiki-e/upload-rust-binary-action@0e34102c043ded9f2ca39f7af5cd99a540c61aff # v1.29.1
+        with:
+          bin: sts-cat-http
+          target: ${{ matrix.target }}
+          tar: unix
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-lambda:
+    needs: [create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lambda-arch: arm64
+            arch-suffix: arm64
+          - lambda-arch: x86-64
+            arch-suffix: x86_64
+    runs-on: ubuntu-latest
+    outputs:
+      sha512-arm64: ${{ steps.sha512.outputs.sha512-arm64 }}
+      sha512-x86_64: ${{ steps.sha512.outputs.sha512-x86_64 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: cargo-bins/cargo-binstall@main
+      - uses: step-security/setup-zig@190f429650adf2a785549867b458a8a37b0077a4 # v2.2.1
+      - run: cargo binstall --no-confirm cargo-lambda
+      - name: build
+        run: >-
+          cargo lambda build --release
+          --${{ matrix.lambda-arch }}
+          --output-format zip
+          --bin sts-cat-lambda
+          --features aws-lambda,aws-kms
+      - name: rename
+        run: mv target/lambda/sts-cat-lambda/bootstrap.zip sts-cat-lambda.${{ matrix.arch-suffix }}.zip
+      - name: upload to release
+        run: gh release upload "${{ github.ref_name }}" "sts-cat-lambda.${{ matrix.arch-suffix }}.zip" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: compute source_sha512
+        id: sha512
+        run: |
+          hash=$(base64 -w 0 < "sts-cat-lambda.${{ matrix.arch-suffix }}.zip" | sha512sum | awk '{print $1}')
+          echo "sha512-${{ matrix.arch-suffix }}=${hash}" >> "$GITHUB_OUTPUT"
+
+  terraform-module:
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: package terraform module
+        run: tar -czf terraform-aws.tar.gz -C contrib/terraform/aws .
+      - name: upload to release
+        run: gh release upload "${{ github.ref_name }}" terraform-aws.tar.gz --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-release-description:
+    needs: [build-lambda, terraform-module]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: download terraform module for checksum
+        run: gh release download "${{ github.ref_name }}" --pattern terraform-aws.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: append deploy info to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA512_ARM64: ${{ needs.build-lambda.outputs.sha512-arm64 }}
+          SHA512_X86_64: ${{ needs.build-lambda.outputs.sha512-x86_64 }}
+        run: |
+          existing_body="$(gh release view "$GITHUB_REF_NAME" --json body -q '.body')"
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          tf_sha256="$(sha256sum terraform-aws.tar.gz | awk '{print $1}')"
+
+          deploy_block="$(cat <<EOF
+
+          #### Deploy
+
+          Note: Lambda zip sums are \`sha512_hex(base64(zip blob))\` for Terraform \`sha512()\` compatibility.
+
+          ##### arm64
+
+          \`\`\`tf
+          source_url    = "${base_url}/sts-cat-lambda.arm64.zip"
+          source_sha512 = "${SHA512_ARM64}"
+          \`\`\`
+
+          ##### x86_64
+
+          \`\`\`tf
+          source_url    = "${base_url}/sts-cat-lambda.x86_64.zip"
+          source_sha512 = "${SHA512_X86_64}"
+          \`\`\`
+
+          ##### Terraform module
+
+          \`\`\`
+          url:    ${base_url}/terraform-aws.tar.gz
+          sha256: ${tf_sha256}
+          \`\`\`
+          EOF
+          )"
+
+          gh release edit "$GITHUB_REF_NAME" --notes "${existing_body}${deploy_block}"
+
+  publish-crate:
+    needs: [build-binaries, build-lambda, terraform-module]
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/sts-cat
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        id: auth
+      - run: cargo publish --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
