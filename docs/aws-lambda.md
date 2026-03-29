@@ -108,6 +108,7 @@ module "sts_cat" {
 | `policy_file_extension` | Override policy file extension | no | |
 | `allowed_issuer_urls` | Restrict allowed OIDC issuers | no | |
 | `org_repo` | Org-level policy repo overrides | no | |
+| `allowed_orgs` | Restrict to specific org names | no | |
 | `environment_variables` | Additional env vars (merged, user wins) | no | `{}` |
 
 ### Outputs

@@ -76,6 +76,12 @@ variable "org_repo" {
   default     = null
 }
 
+variable "allowed_orgs" {
+  type        = list(string)
+  description = "Allowed org names (STS_CAT_ALLOWED_ORGS). When set, rejects requests for unlisted orgs"
+  default     = null
+}
+
 variable "environment_variables" {
   type        = map(string)
   description = "Additional environment variables. Merged with module-managed variables; user values take precedence on collision"

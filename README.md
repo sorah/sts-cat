@@ -31,6 +31,7 @@ All configuration is via environment variables:
 | `STS_CAT_POLICY_FILE_EXTENSION` | No | File extension for trust policy files (default: `.sts.toml`) |
 | `STS_CAT_ALLOWED_ISSUER_URLS` | No | Comma-separated list of allowed OIDC issuer URLs |
 | `STS_CAT_ORG_REPO` | No | Comma-separated `org/repo` pairs to override org-level policy repository |
+| `STS_CAT_ALLOWED_ORGS` | No | Comma-separated list of allowed org names. When set, rejects requests for unlisted orgs |
 
 ### Running
 

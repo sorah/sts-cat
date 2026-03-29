@@ -21,6 +21,9 @@ locals {
     var.org_repo != null ? {
       STS_CAT_ORG_REPO = join(",", var.org_repo)
     } : {},
+    var.allowed_orgs != null ? {
+      STS_CAT_ALLOWED_ORGS = join(",", var.allowed_orgs)
+    } : {},
   )
 }
 

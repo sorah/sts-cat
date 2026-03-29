@@ -42,6 +42,7 @@ pub struct AppState {
     pub github: crate::github::GitHubClient,
     pub oidc: crate::oidc::OidcVerifier,
     org_repos: std::collections::HashMap<String, String>,
+    allowed_orgs: Option<std::collections::HashSet<String>>,
     policy_cache: moka::future::Cache<
         (String, String, String),
         std::sync::Arc<crate::trust_policy::CompiledTrustPolicy>,
@@ -58,6 +59,11 @@ impl AppState {
             crate::github::GitHubClient::new(&config.github_api_url, &config.github_app_id, signer);
         let oidc = crate::oidc::OidcVerifier::new(config.allowed_issuer_urls.clone());
         let org_repos = config.parse_org_repos()?;
+        let allowed_orgs = config.allowed_orgs.as_ref().map(|orgs| {
+            orgs.iter()
+                .map(|o| o.to_ascii_lowercase())
+                .collect::<std::collections::HashSet<_>>()
+        });
 
         let policy_cache = moka::future::Cache::builder()
             .max_capacity(200)
@@ -74,6 +80,7 @@ impl AppState {
             github,
             oidc,
             org_repos,
+            allowed_orgs,
             policy_cache,
             installation_cache,
         }))
@@ -113,6 +120,13 @@ async fn handle_exchange(
 
     let (owner, mut repo, is_org_level) = parse_scope(&req.scope)?;
     let owner = owner.to_ascii_lowercase();
+    if let Some(ref allowed) = state.allowed_orgs
+        && !allowed.contains(&owner)
+    {
+        return Err(Error::PermissionDenied(format!(
+            "org '{owner}' is not allowed"
+        )));
+    }
     if is_org_level && let Some(override_repo) = state.org_repos.get(&owner) {
         repo = override_repo.clone();
     }

@@ -58,6 +58,9 @@ pub struct Config {
 
     #[arg(long, env = "STS_CAT_ORG_REPO", value_delimiter = ',')]
     pub org_repo: Option<Vec<String>>,
+
+    #[arg(long, env = "STS_CAT_ALLOWED_ORGS", value_delimiter = ',')]
+    pub allowed_orgs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -142,6 +145,7 @@ mod tests {
             policy_file_extension: ".sts.toml".into(),
             allowed_issuer_urls: None,
             org_repo,
+            allowed_orgs: None,
         }
     }
 
