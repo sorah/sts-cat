@@ -1,5 +1,8 @@
 use crate::error::Error;
 
+#[derive(Clone, Default)]
+pub(crate) struct RemoteAddr(String);
+
 #[derive(serde::Deserialize)]
 pub struct ExchangeRequest {
     pub scope: String,
@@ -77,14 +80,23 @@ impl AppState {
     }
 }
 
-pub async fn handle_exchange(
+async fn handle_exchange(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<AppState>>,
+    axum::Extension(remote_addr): axum::Extension<RemoteAddr>,
+    headers: axum::http::HeaderMap,
     bearer: Result<
         axum_extra::TypedHeader<headers::Authorization<headers::authorization::Bearer>>,
         axum_extra::typed_header::TypedHeaderRejection,
     >,
     axum::Json(req): axum::Json<ExchangeRequest>,
 ) -> Result<axum::Json<ExchangeResponse>, Error> {
+    let remote_addr = remote_addr.0;
+    let xff = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+
     let axum_extra::TypedHeader(authorization) = bearer
         .map_err(|_| Error::Unauthenticated("missing or invalid Authorization header".into()))?;
     let bearer_token = authorization.token();
@@ -142,6 +154,8 @@ pub async fn handle_exchange(
                 identity = %req.identity,
                 issuer = %claims.iss,
                 subject = %claims.sub,
+                remote_addr = %remote_addr,
+                xff = %xff,
                 reason = %e,
             );
             return Err(e);
@@ -154,6 +168,8 @@ pub async fn handle_exchange(
         identity = %req.identity,
         issuer = %actor.issuer,
         subject = %actor.subject,
+        remote_addr = %remote_addr,
+        xff = %xff,
         installation_id = installation_id,
         policy_path = %policy_path,
     );
@@ -180,6 +196,8 @@ pub async fn handle_exchange(
         identity = %req.identity,
         issuer = %actor.issuer,
         subject = %actor.subject,
+        remote_addr = %remote_addr,
+        xff = %xff,
         installation_id = installation_id,
         token_sha256 = %token_hash,
     );
@@ -229,6 +247,19 @@ pub fn build_router(state: std::sync::Arc<AppState>) -> axum::Router {
     axum::Router::new()
         .route("/token", axum::routing::post(handle_exchange))
         .route("/healthz", axum::routing::get(handle_healthz))
+        .layer(axum::Extension(RemoteAddr::default()))
+        .layer(axum::middleware::from_fn(
+            |mut req: axum::extract::Request, next: axum::middleware::Next| async move {
+                if let Some(ci) = req
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                {
+                    let addr = RemoteAddr(ci.0.ip().to_string());
+                    req.extensions_mut().insert(addr);
+                }
+                next.run(req).await
+            },
+        ))
         .layer(axum::middleware::from_fn(
             move |req, next: axum::middleware::Next| {
                 let val = server_header.clone();
