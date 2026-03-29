@@ -54,14 +54,14 @@ impl axum::response::IntoResponse for Error {
             Error::NotFound(_) => (axum::http::StatusCode::NOT_FOUND, "not found"),
             Error::RateLimited => (axum::http::StatusCode::TOO_MANY_REQUESTS, "rate limited"),
             Error::GitHubApi(e) => {
-                tracing::error!(error = %e, "GitHub API error");
+                tracing::error!(error = ?e, "GitHub API error");
                 (
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     "internal error",
                 )
             }
             Error::OidcDiscovery(e) => {
-                tracing::error!(error = %e, "OIDC discovery error");
+                tracing::error!(error = ?e, "OIDC discovery error");
                 (
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     "internal error",
@@ -87,7 +87,7 @@ impl axum::response::IntoResponse for Error {
                 (axum::http::StatusCode::NOT_FOUND, "not found")
             }
             Error::Internal(e) => {
-                tracing::error!(error = %e, "internal error");
+                tracing::error!(error = ?e, "internal error");
                 (
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     "internal error",
