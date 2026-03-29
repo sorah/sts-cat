@@ -2,6 +2,8 @@ name: release
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 on:
   push:
@@ -63,6 +65,9 @@ jobs:
           target: ${{ matrix.target }}
           tar: unix
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: sts-cat-http-${{ matrix.target }}.tar.gz
 
   build-lambda:
     needs: [create-release]
@@ -97,6 +102,9 @@ jobs:
         run: gh release upload "${{ github.ref_name }}" "sts-cat-lambda.${{ matrix.arch-suffix }}.zip" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: sts-cat-lambda.${{ matrix.arch-suffix }}.zip
       - name: compute source_sha512
         id: sha512
         run: |
@@ -114,6 +122,9 @@ jobs:
         run: gh release upload "${{ github.ref_name }}" terraform-aws.tar.gz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: terraform-aws.tar.gz
 
   update-release-description:
     needs: [build-lambda, terraform-module]
