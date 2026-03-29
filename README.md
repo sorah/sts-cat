@@ -52,15 +52,15 @@ docker run \
   sts-cat
 ```
 
-### Lambda Deployment
+### AWS Lambda Deployment
 
-Build with the `aws-lambda` feature:
+Build with cargo-lambda:
 
 ```bash
 cargo lambda build --release
 ```
 
-Deploy the `sts-cat-lambda` binary as a Lambda function with Function URL (`AuthType=NONE`).
+A Terraform module and prebuilt Lambda zip packages are also available. See [docs/aws-lambda.md](docs/aws-lambda.md) for full deployment instructions including IAM role, KMS key setup, and the Terraform module reference.
 
 ## API
 

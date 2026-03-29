@@ -1,6 +1,10 @@
 # Deploying sts-cat on AWS Lambda
 
-This guide covers deploying sts-cat as an AWS Lambda function with a function URL, using the provided Terraform module.
+This guide covers deploying sts-cat as an AWS Lambda function with a function URL, using the provided Terraform module. You can also build the Lambda package yourself with:
+
+```bash
+cargo lambda build --release
+```
 
 ## Prerequisites
 
