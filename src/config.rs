@@ -19,6 +19,9 @@ pub struct Config {
     #[arg(long, default_value_t = 8080, env = "PORT")]
     pub port: u16,
 
+    #[arg(long, env = "STS_CAT_LOG_JSON")]
+    pub log_json: bool,
+
     #[arg(long, env = "STS_CAT_KEY_SOURCE")]
     pub key_source: KeySource,
 

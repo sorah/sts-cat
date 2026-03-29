@@ -1,9 +1,8 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    sts_cat::init_tracing();
-
     use clap::Parser as _;
     let config = sts_cat::config::Config::parse();
+    sts_cat::init_tracing(config.log_json);
     let addr = format!("{}:{}", config.host, config.port);
 
     let state = sts_cat::exchange::AppState::build(config).await?;
