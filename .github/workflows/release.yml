@@ -87,8 +87,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@stable
       - uses: cargo-bins/cargo-binstall@main
-      - uses: step-security/setup-zig@190f429650adf2a785549867b458a8a37b0077a4 # v2.2.1
-      - run: cargo binstall --no-confirm cargo-lambda
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
       - name: build
         run: >-
           cargo lambda build --release
