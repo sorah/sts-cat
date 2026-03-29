@@ -38,6 +38,7 @@ pub struct AppState {
     pub config: crate::config::Config,
     pub github: crate::github::GitHubClient,
     pub oidc: crate::oidc::OidcVerifier,
+    org_repos: std::collections::HashMap<String, String>,
     policy_cache: moka::future::Cache<
         (String, String, String),
         std::sync::Arc<crate::trust_policy::CompiledTrustPolicy>,
@@ -53,6 +54,7 @@ impl AppState {
         let github =
             crate::github::GitHubClient::new(&config.github_api_url, &config.github_app_id, signer);
         let oidc = crate::oidc::OidcVerifier::new(config.allowed_issuer_urls.clone());
+        let org_repos = config.parse_org_repos()?;
 
         let policy_cache = moka::future::Cache::builder()
             .max_capacity(200)
@@ -68,6 +70,7 @@ impl AppState {
             config,
             github,
             oidc,
+            org_repos,
             policy_cache,
             installation_cache,
         }))
@@ -96,8 +99,11 @@ pub async fn handle_exchange(
         return Err(Error::BadRequest("invalid identity format".into()));
     }
 
-    let (owner, repo, is_org_level) = parse_scope(&req.scope)?;
+    let (owner, mut repo, is_org_level) = parse_scope(&req.scope)?;
     let owner = owner.to_ascii_lowercase();
+    if is_org_level && let Some(override_repo) = state.org_repos.get(&owner) {
+        repo = override_repo.clone();
+    }
     let claims = state.oidc.verify(bearer_token).await?;
 
     let installation_id = if let Some(id) = state.installation_cache.get(&owner).await {

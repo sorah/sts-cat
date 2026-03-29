@@ -55,6 +55,9 @@ pub struct Config {
 
     #[arg(long, env = "STS_CAT_ALLOWED_ISSUER_URLS", value_delimiter = ',')]
     pub allowed_issuer_urls: Option<Vec<String>>,
+
+    #[arg(long, env = "STS_CAT_ORG_REPO", value_delimiter = ',')]
+    pub org_repo: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -66,6 +69,28 @@ pub enum KeySource {
 }
 
 impl Config {
+    pub fn parse_org_repos(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, anyhow::Error> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(ref entries) = self.org_repo {
+            for entry in entries {
+                let (org, repo) = entry.split_once('/').ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "invalid --org-repo value '{entry}': expected format 'org/repo'"
+                    )
+                })?;
+                if org.is_empty() || repo.is_empty() {
+                    anyhow::bail!(
+                        "invalid --org-repo value '{entry}': org and repo must not be empty"
+                    );
+                }
+                map.insert(org.to_ascii_lowercase(), repo.to_owned());
+            }
+        }
+        Ok(map)
+    }
+
     pub async fn build_signer(
         &self,
     ) -> Result<std::sync::Arc<dyn crate::signer::Signer>, anyhow::Error> {
@@ -93,5 +118,76 @@ impl Config {
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_org_repo(org_repo: Option<Vec<String>>) -> Config {
+        Config {
+            github_app_id: "123".into(),
+            github_api_url: "https://api.github.com".into(),
+            domain: "example.com".into(),
+            host: "0.0.0.0".into(),
+            port: 8080,
+            log_json: false,
+            key_source: KeySource::File,
+            key_file: Some("/dev/null".into()),
+            key_env: None,
+            #[cfg(feature = "aws-kms")]
+            aws_kms_key_arn: None,
+            policy_path_prefix: ".github/sts-cat".into(),
+            policy_file_extension: ".sts.toml".into(),
+            allowed_issuer_urls: None,
+            org_repo,
+        }
+    }
+
+    #[test]
+    fn test_parse_org_repos_none() {
+        let config = config_with_org_repo(None);
+        let map = config.parse_org_repos().unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_org_repos_single() {
+        let config = config_with_org_repo(Some(vec!["myorg/policies".into()]));
+        let map = config.parse_org_repos().unwrap();
+        assert_eq!(map.get("myorg").unwrap(), "policies");
+    }
+
+    #[test]
+    fn test_parse_org_repos_multiple() {
+        let config =
+            config_with_org_repo(Some(vec!["myorg/policies".into(), "other/infra".into()]));
+        let map = config.parse_org_repos().unwrap();
+        assert_eq!(map.get("myorg").unwrap(), "policies");
+        assert_eq!(map.get("other").unwrap(), "infra");
+    }
+
+    #[test]
+    fn test_parse_org_repos_lowercases_org() {
+        let config = config_with_org_repo(Some(vec!["MyOrg/policies".into()]));
+        let map = config.parse_org_repos().unwrap();
+        assert_eq!(map.get("myorg").unwrap(), "policies");
+        assert!(map.get("MyOrg").is_none());
+    }
+
+    #[test]
+    fn test_parse_org_repos_rejects_no_slash() {
+        let config = config_with_org_repo(Some(vec!["myorg".into()]));
+        assert!(config.parse_org_repos().is_err());
+    }
+
+    #[test]
+    fn test_parse_org_repos_rejects_empty_parts() {
+        let config = config_with_org_repo(Some(vec!["/repo".into()]));
+        assert!(config.parse_org_repos().is_err());
+
+        let config = config_with_org_repo(Some(vec!["org/".into()]));
+        assert!(config.parse_org_repos().is_err());
     }
 }
