@@ -225,9 +225,23 @@ fn parse_scope(scope: &str) -> Result<(String, String, bool), Error> {
 }
 
 pub fn build_router(state: std::sync::Arc<AppState>) -> axum::Router {
+    let server_header = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     axum::Router::new()
         .route("/token", axum::routing::post(handle_exchange))
         .route("/healthz", axum::routing::get(handle_healthz))
+        .layer(axum::middleware::from_fn(
+            move |req, next: axum::middleware::Next| {
+                let val = server_header.clone();
+                async move {
+                    let mut resp = next.run(req).await;
+                    resp.headers_mut().insert(
+                        axum::http::header::SERVER,
+                        axum::http::HeaderValue::from_str(&val).unwrap(),
+                    );
+                    resp
+                }
+            },
+        ))
         .with_state(state)
 }
 
