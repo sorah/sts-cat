@@ -1,6 +1,13 @@
 [package]
 name = "sts-cat"
 version = "0.1.0-pre1"
+authors = ["Sorah Fukumori <her@sorah.jp>"]
+description = "Yet another GitHub STS, aims to be easy-self-hosting and cloud-agnostic"
+keywords = ["github", "oidc", "security"]
+categories = ["authentication", "web-programming"]
+homepage = "https://github.com/sorah/sts-cat"
+repository = "https://github.com/sorah/sts-cat"
+license = "Apache-2.0"
 edition = "2024"
 
 [[bin]]
