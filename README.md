@@ -19,14 +19,18 @@ All configuration is via environment variables:
 |---|---|---|
 | `STS_CAT_GITHUB_APP_ID` | Yes | GitHub App ID |
 | `STS_CAT_DOMAIN` | Yes | Domain name used as default audience (e.g. `sts.example.com`) |
-| `STS_CAT_HOST` / `HOST` | No | Listen host (default: `0.0.0.0`). Ignored in Lambda mode. |
-| `STS_CAT_PORT` / `PORT` | No | Listen port (default: `8080`). Ignored in Lambda mode. |
-| `STS_CAT_KEY_SOURCE` | Yes | Signing key source: `file`, `env`, or `kms` |
+| `STS_CAT_GITHUB_API_URL` | No | GitHub API base URL (default: `https://api.github.com`) |
+| `HOST` | No | Listen host (default: `0.0.0.0`). Ignored in Lambda mode. |
+| `PORT` | No | Listen port (default: `8080`). Ignored in Lambda mode. |
+| `STS_CAT_LOG_JSON` | No | Enable JSON-formatted logging |
+| `STS_CAT_KEY_SOURCE` | Yes | Signing key source: `file`, `env`, or `aws-kms` |
 | `STS_CAT_KEY_FILE` | When `file` | Path to the GitHub App PEM private key |
 | `STS_CAT_KEY_ENV` | When `env` | Name of env var containing the PEM private key |
-| `STS_CAT_KMS_KEY_ARN` | When `kms` | ARN of the AWS KMS asymmetric signing key |
+| `STS_CAT_AWS_KMS_KEY_ARN` | When `aws-kms` | ARN of the AWS KMS asymmetric signing key |
 | `STS_CAT_POLICY_PATH_PREFIX` | No | Path prefix within repos for trust policy files (default: `.github/sts-cat`) |
 | `STS_CAT_POLICY_FILE_EXTENSION` | No | File extension for trust policy files (default: `.sts.toml`) |
+| `STS_CAT_ALLOWED_ISSUER_URLS` | No | Comma-separated list of allowed OIDC issuer URLs |
+| `STS_CAT_ORG_REPO` | No | Comma-separated `org/repo` pairs to override org-level policy repository |
 
 ### Running
 
@@ -179,19 +183,19 @@ All regex patterns use Rust `regex` crate syntax and are automatically anchored 
 ## Building
 
 ```bash
-# Default (HTTP server only)
+# Default (includes both aws-kms and aws-lambda)
 cargo build --release
 
-# With AWS KMS support
-cargo build --release --features aws-kms
+# HTTP server only (no AWS KMS or Lambda support)
+cargo build --release --no-default-features
 
-# Lambda binary
-cargo build --release --features aws-lambda
+# Lambda binary via cargo-lambda
+cargo lambda build --release
 ```
 
 ## Feature Flags
 
 | Feature | Default | Description |
 |---|---|---|
-| `aws-kms` | Off | Enables AWS KMS signer |
-| `aws-lambda` | Off | Enables `sts-cat-lambda` binary |
+| `aws-kms` | On | Enables AWS KMS signer |
+| `aws-lambda` | On | Enables `sts-cat-lambda` binary |
