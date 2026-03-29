@@ -242,6 +242,28 @@ fn parse_scope(scope: &str) -> Result<(String, String, bool), Error> {
     }
 }
 
+fn make_request_span(req: &axum::extract::Request) -> tracing::Span {
+    let remote_addr = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_default();
+    let xff = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    tracing::info_span!(
+        "request",
+        method = %req.method(),
+        uri = %req.uri(),
+        version = ?req.version(),
+        remote_addr = %remote_addr,
+        xff = %xff,
+    )
+}
+
 pub fn build_router(state: std::sync::Arc<AppState>) -> axum::Router {
     let server_header = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     axum::Router::new()
@@ -261,9 +283,11 @@ pub fn build_router(state: std::sync::Arc<AppState>) -> axum::Router {
             },
         ))
         .layer(
-            tower_http::trace::TraceLayer::new_for_http().on_response(
-                tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
-            ),
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(make_request_span as fn(&axum::extract::Request) -> tracing::Span)
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
+                ),
         )
         .layer(axum::middleware::from_fn(
             move |req, next: axum::middleware::Next| {
