@@ -1,3 +1,9 @@
+## 0.3.0 (2026-03-29)
+
+### Enhancements
+
+- Trust policy gains `max_token_lifetime` option to reject OIDC tokens whose lifetime (`exp - nbf` or `exp - iat`) exceeds a specified number of seconds
+
 ## 0.2.0 (2026-03-29)
 
 ### Enhancements
