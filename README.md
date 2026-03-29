@@ -93,6 +93,8 @@ Returns `{"ok": true}` with HTTP 200.
 
 ### Usage from GitHub Actions
 
+A reusable composite action is provided at [`.github/actions/exchange-token`](.github/actions/exchange-token/action.yml):
+
 ```yaml
 jobs:
   deploy:
@@ -101,38 +103,21 @@ jobs:
       id-token: write
     steps:
       - name: Get token from sts-cat
-        uses: actions/github-script@v7
         id: sts-cat
+        uses: sorah/sts-cat/.github/actions/exchange-token@main
         with:
-          script: |
-            const idToken = await core.getIDToken('https://sts.example.com');
-            const resp = await fetch('https://sts.example.com/token', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${idToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                scope: '${{ github.repository }}',
-                identity: 'deploy',
-              }),
-            });
-            if (!resp.ok) {
-              throw new Error(`sts-cat returned ${resp.status}: ${await resp.text()}`);
-            }
-            const { token } = await resp.json();
-            core.setSecret(token);
-            core.setOutput('github_token', token);
-          result-encoding: string
+          endpoint: https://sts.example.com
+          scope: ${{ github.repository }}
+          identity: deploy
 
       - name: Use the token
         env:
-          GITHUB_TOKEN: ${{ steps.sts-cat.outputs.github_token }}
+          GITHUB_TOKEN: ${{ steps.sts-cat.outputs.token }}
         run: |
           gh api repos/myorg/myrepo/pulls
 ```
 
-The audience passed to `core.getIDToken()` must match the `STS_CAT_IDENTIFIER` value (or the `audience` field in the trust policy).
+The `audience` input defaults to the `endpoint` URL and must match the `STS_CAT_IDENTIFIER` value (or the `audience` field in the trust policy). Override it with the `audience` input if they differ.
 
 ## Trust Policies
 

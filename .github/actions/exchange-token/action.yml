@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: CC0-1.0
+# This composite workflow is intentionally be very simple. If you're paranoid about the github actions supply chain risk, you can copy this file to your repository and reference it, instead of relying 3rd party files. License is CC0-1.0.
+
+name: exchange-token
+description: Exchange an OIDC ID token for a GitHub installation access token via sts-cat
+
+inputs:
+  endpoint:
+    description: 'sts-cat server URL (e.g. https://sts.example.com)'
+    required: true
+  scope:
+    description: 'Scope for token exchange (e.g. myorg/myrepo for repo-level, myorg for org-level)'
+    required: true
+  identity:
+    description: 'Trust policy identity name (without file extension)'
+    required: true
+  audience:
+    description: 'Audience for the OIDC token request (defaults to endpoint URL)'
+    required: false
+
+outputs:
+  token:
+    description: 'GitHub installation access token'
+    value: ${{ steps.exchange.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Exchange OIDC token via sts-cat
+      id: exchange
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+      env:
+        STS_CAT_ENDPOINT: ${{ inputs.endpoint }}
+        STS_CAT_SCOPE: ${{ inputs.scope }}
+        STS_CAT_IDENTITY: ${{ inputs.identity }}
+        STS_CAT_AUDIENCE: ${{ inputs.audience }}
+      with:
+        script: |
+          const endpoint = process.env.STS_CAT_ENDPOINT;
+          const scope = process.env.STS_CAT_SCOPE;
+          const identity = process.env.STS_CAT_IDENTITY;
+          const audience = process.env.STS_CAT_AUDIENCE || endpoint;
+
+          const idToken = await core.getIDToken(audience);
+          const resp = await fetch(`${endpoint}/token`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ scope, identity }),
+          });
+          if (!resp.ok) {
+            throw new Error(`sts-cat returned ${resp.status}: ${await resp.text()}`);
+          }
+          const { token } = await resp.json();
+          core.setSecret(token);
+          core.setOutput('token', token);
