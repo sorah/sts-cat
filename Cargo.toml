@@ -54,4 +54,4 @@ aws-smithy-mocks = "0.2"
 rsa = { version = "0.9", features = ["pem"] }
 
 [package.metadata.lambda.deploy]
-features = ["aws-lambda"]
+features = ["aws-lambda", "aws-kms"]
