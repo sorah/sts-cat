@@ -9,6 +9,7 @@ pub struct TrustPolicy {
     pub audience: Option<String>,
     pub audience_pattern: Option<String>,
     pub claim_pattern: Option<std::collections::HashMap<String, String>>,
+    pub max_token_lifetime: Option<u64>,
     pub permissions: Permissions,
     pub repositories: Option<Vec<String>>,
 }
@@ -24,6 +25,7 @@ pub struct CompiledTrustPolicy {
     subject: StringMatcher,
     audience: AudienceMatch,
     claim_patterns: Vec<(String, regex::Regex)>,
+    max_token_lifetime: Option<u64>,
     pub permissions: Permissions,
     pub repositories: Option<Vec<String>>,
 }
@@ -170,6 +172,7 @@ impl TrustPolicy {
             subject: StringMatcher::compile(self.subject, self.subject_pattern, "subject")?,
             audience: AudienceMatch::compile(self.audience, self.audience_pattern)?,
             claim_patterns: compile_claim_patterns(self.claim_pattern)?,
+            max_token_lifetime: self.max_token_lifetime,
             permissions: self.permissions,
             repositories: self.repositories,
         })
@@ -192,6 +195,7 @@ impl CompiledTrustPolicy {
         self.issuer.check(&claims.iss, "issuer")?;
         self.subject.check(&claims.sub, "subject")?;
         self.audience.check(claims.aud.iter(), identifier)?;
+        self.check_token_lifetime(claims)?;
         let matched_claims = self.check_claim_patterns(claims)?;
 
         Ok(Actor {
@@ -199,6 +203,37 @@ impl CompiledTrustPolicy {
             subject: claims.sub.clone(),
             matched_claims,
         })
+    }
+
+    fn check_token_lifetime(&self, claims: &crate::oidc::TokenClaims) -> Result<(), Error> {
+        let Some(max) = self.max_token_lifetime else {
+            return Ok(());
+        };
+
+        let extra = &claims.extra;
+
+        let exp = extra.get("exp").and_then(|v| v.as_u64()).ok_or_else(|| {
+            Error::PermissionDenied("max_token_lifetime is set but token has no 'exp' claim".into())
+        })?;
+
+        let start = extra
+            .get("nbf")
+            .and_then(|v| v.as_u64())
+            .or_else(|| extra.get("iat").and_then(|v| v.as_u64()))
+            .ok_or_else(|| {
+                Error::PermissionDenied(
+                    "max_token_lifetime is set but token has neither 'nbf' nor 'iat' claim".into(),
+                )
+            })?;
+
+        let lifetime = exp.saturating_sub(start);
+        if lifetime > max {
+            return Err(Error::PermissionDenied(format!(
+                "token lifetime {lifetime}s exceeds max_token_lifetime {max}s"
+            )));
+        }
+
+        Ok(())
     }
 
     fn check_claim_patterns(
@@ -541,5 +576,88 @@ mod tests {
                 .check_token(&make_claims("prefix-repo:myorg/b"), "sts.example.com")
                 .is_err()
         );
+    }
+
+    fn make_claims_with_times(
+        exp: Option<u64>,
+        iat: Option<u64>,
+        nbf: Option<u64>,
+    ) -> crate::oidc::TokenClaims {
+        let mut extra = std::collections::HashMap::new();
+        if let Some(v) = exp {
+            extra.insert("exp".into(), serde_json::Value::from(v));
+        }
+        if let Some(v) = iat {
+            extra.insert("iat".into(), serde_json::Value::from(v));
+        }
+        if let Some(v) = nbf {
+            extra.insert("nbf".into(), serde_json::Value::from(v));
+        }
+        crate::oidc::TokenClaims {
+            iss: "https://example.com".into(),
+            sub: "sub".into(),
+            aud: crate::oidc::OneOrMany::One("sts.example.com".into()),
+            extra,
+        }
+    }
+
+    fn compile_lifetime_policy(max_token_lifetime: Option<u64>) -> CompiledTrustPolicy {
+        let toml = format!(
+            r#"
+            issuer = "https://example.com"
+            subject = "sub"
+            {}
+
+            [permissions]
+            contents = "read"
+        "#,
+            max_token_lifetime
+                .map(|v| format!("max_token_lifetime = {v}"))
+                .unwrap_or_default()
+        );
+        TrustPolicy::parse(&toml).unwrap().compile(false).unwrap()
+    }
+
+    #[test]
+    fn test_max_token_lifetime_within_limit() {
+        let compiled = compile_lifetime_policy(Some(600));
+        let claims = make_claims_with_times(Some(1000600), Some(1000000), None);
+        assert!(compiled.check_token(&claims, "sts.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_max_token_lifetime_exceeded() {
+        let compiled = compile_lifetime_policy(Some(600));
+        let claims = make_claims_with_times(Some(1000601), Some(1000000), None);
+        assert!(compiled.check_token(&claims, "sts.example.com").is_err());
+    }
+
+    #[test]
+    fn test_max_token_lifetime_prefers_nbf() {
+        let compiled = compile_lifetime_policy(Some(600));
+        // nbf=1000000, iat=999000, exp=1000500 → lifetime from nbf = 500s (ok), from iat = 1500s (would fail)
+        let claims = make_claims_with_times(Some(1000500), Some(999000), Some(1000000));
+        assert!(compiled.check_token(&claims, "sts.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_max_token_lifetime_not_set() {
+        let compiled = compile_lifetime_policy(None);
+        let claims = make_claims_with_times(Some(2000000), Some(1000000), None);
+        assert!(compiled.check_token(&claims, "sts.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_max_token_lifetime_missing_exp() {
+        let compiled = compile_lifetime_policy(Some(600));
+        let claims = make_claims_with_times(None, Some(1000000), None);
+        assert!(compiled.check_token(&claims, "sts.example.com").is_err());
+    }
+
+    #[test]
+    fn test_max_token_lifetime_missing_iat_and_nbf() {
+        let compiled = compile_lifetime_policy(Some(600));
+        let claims = make_claims_with_times(Some(1000600), None, None);
+        assert!(compiled.check_token(&claims, "sts.example.com").is_err());
     }
 }

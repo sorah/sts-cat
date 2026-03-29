@@ -175,6 +175,7 @@ contents = "read"
 | `audience` | string | Optional | Exact match for at least one token audience |
 | `audience_pattern` | string | | Regex pattern for audience |
 | `claim_pattern` | table | Optional | Map of claim names to regex patterns |
+| `max_token_lifetime` | integer | Optional | Max allowed token lifetime in seconds (`exp - nbf` or `exp - iat`) |
 | `permissions` | table | Required | GitHub permission keys and access levels |
 | `repositories` | array | Org-level only | Scoped list of repositories |
 
