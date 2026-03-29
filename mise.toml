@@ -4,3 +4,6 @@ actionlint = "latest"
 hk = "latest"
 pkl = "latest"
 zig = "latest"
+
+[settings]
+install_before = "3d"
