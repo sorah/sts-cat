@@ -1,6 +1,6 @@
 # sts-cat
 
-OIDC-to-GitHub-token exchange service. A Rust reimplementation of [octo-sts](https://github.com/octo-sts/app) designed for easy self-hosting on AWS (Lambda, ECS) or any environment with a TCP socket.
+OIDC-to-GitHub-token exchange service. A Rust reimplementation of [octo-sts](https://github.com/octo-sts/app) designed for easy self-hosting and being cloud-agnostic. Currently supports AWS (Lambda, KMS) natively, or any environment with a plain HTTP server binary and private keys on flat files.
 
 sts-cat accepts OIDC ID tokens from any identity provider, validates them against trust policies stored in GitHub repositories, and returns scoped GitHub installation access tokens.
 
@@ -180,6 +180,8 @@ cargo lambda build --release
 |---|---|---|
 | `aws-kms` | On | Enables AWS KMS signer |
 | `aws-lambda` | On | Enables `sts-cat-lambda` binary |
+
+Contributions welcomed to add native support for more cloud providers.
 
 ## License
 
