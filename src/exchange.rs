@@ -43,6 +43,7 @@ pub struct AppState {
     pub oidc: crate::oidc::OidcVerifier,
     org_repos: std::collections::HashMap<String, String>,
     allowed_orgs: Option<std::collections::HashSet<String>>,
+    policy_ignored_repos: std::collections::HashSet<(String, String)>,
     policy_cache: moka::future::Cache<
         (String, String, String),
         std::sync::Arc<crate::trust_policy::CompiledTrustPolicy>,
@@ -59,6 +60,7 @@ impl AppState {
             crate::github::GitHubClient::new(&config.github_api_url, &config.github_app_id, signer);
         let oidc = crate::oidc::OidcVerifier::new(config.allowed_issuer_urls.clone());
         let org_repos = config.parse_org_repos()?;
+        let policy_ignored_repos = config.parse_policy_ignored_repos()?;
         let allowed_orgs = config.allowed_orgs.as_ref().map(|orgs| {
             orgs.iter()
                 .map(|o| o.to_ascii_lowercase())
@@ -81,6 +83,7 @@ impl AppState {
             oidc,
             org_repos,
             allowed_orgs,
+            policy_ignored_repos,
             policy_cache,
             installation_cache,
         }))
@@ -125,6 +128,15 @@ async fn handle_exchange(
     {
         return Err(Error::PermissionDenied(format!(
             "org '{owner}' is not allowed"
+        )));
+    }
+    if !is_org_level
+        && state
+            .policy_ignored_repos
+            .contains(&(owner.clone(), repo.to_ascii_lowercase()))
+    {
+        return Err(Error::PermissionDenied(format!(
+            "repository-level policies for '{owner}/{repo}' are ignored"
         )));
     }
     if is_org_level && let Some(override_repo) = state.org_repos.get(&owner) {

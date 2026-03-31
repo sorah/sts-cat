@@ -1,3 +1,9 @@
+## [unreleased]
+
+### Enhancements
+
+- `--policy-ignored-repo {org}/{repo}` option was added to ignore repo-level policies from certain repositories.
+
 ## 0.3.0 (2026-03-29)
 
 ### Enhancements

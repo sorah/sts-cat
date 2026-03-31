@@ -61,6 +61,9 @@ pub struct Config {
 
     #[arg(long, env = "STS_CAT_ALLOWED_ORGS", value_delimiter = ',')]
     pub allowed_orgs: Option<Vec<String>>,
+
+    #[arg(long, env = "STS_CAT_POLICY_IGNORED_REPOS", value_delimiter = ',')]
+    pub policy_ignored_repos: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -92,6 +95,28 @@ impl Config {
             }
         }
         Ok(map)
+    }
+
+    pub fn parse_policy_ignored_repos(
+        &self,
+    ) -> Result<std::collections::HashSet<(String, String)>, anyhow::Error> {
+        let mut set = std::collections::HashSet::new();
+        if let Some(ref entries) = self.policy_ignored_repos {
+            for entry in entries {
+                let (org, repo) = entry.split_once('/').ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "invalid --policy-ignored-repos value '{entry}': expected format 'org/repo'"
+                    )
+                })?;
+                if org.is_empty() || repo.is_empty() {
+                    anyhow::bail!(
+                        "invalid --policy-ignored-repos value '{entry}': org and repo must not be empty"
+                    );
+                }
+                set.insert((org.to_ascii_lowercase(), repo.to_ascii_lowercase()));
+            }
+        }
+        Ok(set)
     }
 
     pub async fn build_signer(
@@ -146,6 +171,7 @@ mod tests {
             allowed_issuer_urls: None,
             org_repo,
             allowed_orgs: None,
+            policy_ignored_repos: None,
         }
     }
 
@@ -184,6 +210,60 @@ mod tests {
     fn test_parse_org_repos_rejects_no_slash() {
         let config = config_with_org_repo(Some(vec!["myorg".into()]));
         assert!(config.parse_org_repos().is_err());
+    }
+
+    fn config_with_policy_ignored_repos(policy_ignored_repos: Option<Vec<String>>) -> Config {
+        Config {
+            policy_ignored_repos,
+            ..config_with_org_repo(None)
+        }
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_none() {
+        let config = config_with_policy_ignored_repos(None);
+        let set = config.parse_policy_ignored_repos().unwrap();
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_single() {
+        let config = config_with_policy_ignored_repos(Some(vec!["myorg/myrepo".into()]));
+        let set = config.parse_policy_ignored_repos().unwrap();
+        assert!(set.contains(&("myorg".into(), "myrepo".into())));
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_multiple() {
+        let config = config_with_policy_ignored_repos(Some(vec![
+            "myorg/repo1".into(),
+            "other/repo2".into(),
+        ]));
+        let set = config.parse_policy_ignored_repos().unwrap();
+        assert!(set.contains(&("myorg".into(), "repo1".into())));
+        assert!(set.contains(&("other".into(), "repo2".into())));
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_lowercases() {
+        let config = config_with_policy_ignored_repos(Some(vec!["MyOrg/MyRepo".into()]));
+        let set = config.parse_policy_ignored_repos().unwrap();
+        assert!(set.contains(&("myorg".into(), "myrepo".into())));
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_rejects_no_slash() {
+        let config = config_with_policy_ignored_repos(Some(vec!["myorg".into()]));
+        assert!(config.parse_policy_ignored_repos().is_err());
+    }
+
+    #[test]
+    fn test_parse_policy_ignored_repos_rejects_empty_parts() {
+        let config = config_with_policy_ignored_repos(Some(vec!["/repo".into()]));
+        assert!(config.parse_policy_ignored_repos().is_err());
+
+        let config = config_with_policy_ignored_repos(Some(vec!["org/".into()]));
+        assert!(config.parse_policy_ignored_repos().is_err());
     }
 
     #[test]
