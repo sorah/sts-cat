@@ -6,4 +6,4 @@ pkl = "latest"
 zig = "latest"
 
 [settings]
-install_before = "3d"
+minimum_release_age = "3d"
